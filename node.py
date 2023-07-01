@@ -7,6 +7,19 @@ import re
 
 class Node:
     def __init__(self, host, device):
+        # Validate device string.
+        assert re.compile(
+            r'^(cuda(:[0-9]+)?|mps|[ctx]pu)$'
+        ).search(device), f'"{device}" is not a valid device!'
+
+        # Validate if host address is a valid IPv4 or domain name.
+        # TODO: Add support for IPv6!
+        assert re.compile(
+            r'^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$'
+        ).search(host) or re.compile(
+            r'^(((2[0-5]{0,2}|1[0-9]{0,2}|[1-9][0-9]?|0)\.){3}(2[0-5]{0,2}|1[0-9]{0,2}|[1-9][0-9]?)|localhost)$'
+        ).search(host), f'"{host}" is not a valid IPv4 address or domain name!'
+
         self.host = host
         self.device = torch.device(device)
         self._attack = None
@@ -28,7 +41,7 @@ class Node:
     def _request_init_data(self):
         # TODO: Make an HTTP GET request to the ES (Execution Server) to get the attack object and the model class.
         pass
-
+        
     def _request_batch(self):
         # TODO: Make an HTTP GET request to the ES for a new batch.
         pass
@@ -77,17 +90,6 @@ if __name__ == '__main__':
         args = vars(args)
         del args['config']
 
-    # Validate device string.
-    assert re.compile(
-        r'^(cuda(:[0-9]+)?|mps|[ctx]pu)$'
-    ).search(args['device']), f'"{args["device"]}" is not a valid device!'
-
-    # Validate if host address is a valid IPv4 or domain name.
-    assert re.compile(
-        r'^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$'
-    ).search(args['host']) or re.compile(
-        r'^(((2[0-5]{0,2}|1[0-9]{0,2}|[1-9][0-9]?|0)\.){3}(2[0-5]{0,2}|1[0-9]{0,2}|[1-9][0-9]?)|localhost)$'
-    ).search(args['host']), f'"{args["host"]}" is not a valid IP address or domain name!'
-
+    
     Node(**args).run()
 
