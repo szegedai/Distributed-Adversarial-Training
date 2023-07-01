@@ -1,4 +1,5 @@
 import torch
+import pickle
 import requests
 import argparse
 import json
@@ -6,6 +7,8 @@ import re
 
 
 class Node:
+    # Consider adding support for HTTPS too!
+    # TODO: Manage the scenario when the node is not able to access the server temporarily.
     def __init__(self, host, device):
         # Validate device string.
         assert re.compile(
@@ -27,33 +30,32 @@ class Node:
         self._model_id = None
 
     def run(self):
-        # TODO: Start running the node, somewhat like this:
-        # 1) request attack and model class
-        # 2) construct model object
-        # 3) update local model
-        # 4) loop:
-        # 5)     request clean batch
-        # 6)     generate adversarial batch
-        # 7)     send adversarial batch
-        # 8)     update local model if needed
-        pass
+        # Request and setup the attack and model objects.
+        self._attack, self._model = self._get_data(f'http://{self.host}/init')
+        self._model.to(self.device)
+        self._attack.model = self._model
 
-    def _request_init_data(self):
-        # TODO: Make an HTTP GET request to the ES (Execution Server) to get the attack object and the model class.
-        pass
-        
-    def _request_batch(self):
-        # TODO: Make an HTTP GET request to the ES for a new batch.
-        pass
+        # Request clean batches and perturb them, until the program shuts down.
+        while True:
+            clean_batch = self._get_data(f'http://{self.host}/clean_batch')
+            self._send_data(
+                f'http://{self.host}/adv_batch', 
+                self._attack.perturb(*clean_batch)
+            )
 
-    def _send_batch(self, batch):
-        # TODO: Compress and send the perturbed batch to the ES via HTTP PUT.
-        pass
+            # Update the model state if a newer one is available.
+            latest_mode_id = self._get_data(f'http://{self.host}/model_id')
+            if latest_mode_id != self._model_id:
+                self._model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+                self._model_id = latest_mode_id
 
-    def _update_model(self):
-        # TODO: Make an HTTP GET request to the ES for the latest model id and make an additional request for the
-        # latest model state if the local model id does not equal to the recieved latest model id.
-        pass
+    @staticmethod
+    def _get_data(uri):
+        return pickle.loads(requests.get(uri, verify=False).content)
+
+    @staticmethod
+    def _send_data(uri, data):
+        requests.put(uri, pickle.dumps(data), verify=False)
 
 
 if __name__ == '__main__':
