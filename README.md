@@ -47,3 +47,9 @@ Instead of providing the host and device as command-line arguments, you can use 
   "device": "<device>"
 }
 ```
+Replace <host> with the IP address or domain name of the Execution Server and <device> with the local device to use for PyTorch operations.
+
+To use the configuration file, run the script with the -c or --config option:
+```bash
+python node.py -c config.json
+```
