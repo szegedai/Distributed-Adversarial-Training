@@ -14,7 +14,11 @@ This script represents a worker node for distributed adversarial training. It co
    git clone <repository-url>
    ```
    
-3. Install the required dependencies:
+2. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run node:
    ```bash
    pip install -r requirements.txt
    ```
