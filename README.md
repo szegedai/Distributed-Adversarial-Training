@@ -10,7 +10,11 @@ This script represents a worker node for distributed adversarial training. It co
 ## Getting Started
 
 1. Clone the repository:
+   ```bash
    git clone <repository-url>
+   ```
    
-2. Install the required dependencies:
+3. Install the required dependencies:
+  ```bash
   pip install -r requirements.txt
+  ```
