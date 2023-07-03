@@ -25,3 +25,25 @@ python node.py <host> <device>
 ```bash
 python node.py -c config.json
 ```
+
+## Running as a Docker Container (optional)
+1. Build the Docker image:
+```bash
+docker build -t adversarial-training-node .
+```
+2. Run a Docker container:
+```bash
+docker run -d --name node-container adversarial-training-node
+```
+
+This command starts the container in detached mode with the name node-container.
+Note: Adjust the Dockerfile and commands as needed for your specific setup.
+
+## Configuration
+Instead of providing the host and device as command-line arguments, you can use a JSON configuration file (config.json) to specify these values. The file should have the following structure:
+```json
+{
+  "host": "<host>",
+  "device": "<device>"
+}
+```
