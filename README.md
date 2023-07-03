@@ -15,6 +15,6 @@ This script represents a worker node for distributed adversarial training. It co
    ```
    
 3. Install the required dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
+   ```bash
+   pip install -r requirements.txt
+   ```
