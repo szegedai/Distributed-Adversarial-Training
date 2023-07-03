@@ -10,15 +10,18 @@ This script represents a worker node for distributed adversarial training. It co
 ## Getting Started
 
 1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   ```
-   
+```bash
+git clone <repository-url>
+```
 2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run node:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+```
+3. Run node with argument parameters:
+```bash
+python node.py <host> <device>
+```
+4. Run node with config file:
+```bash
+python node.py -c config.json
+```
