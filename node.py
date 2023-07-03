@@ -33,15 +33,18 @@ class Node:
         self._attack = self._get_data(f'http://{self.host}/init')
         assert hasattr(self._attack, 'model'), 'The attack object must have an attribute named "model"!'
         assert hasattr(self._attack, 'perturb') and callable(self._attack.perturb), 'The attack object must have a method named "perturb"!'
-        self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+        self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))  # Maybe this line is removable?
         self._attack.model = self._attack.model.to(self.device)
 
         # Request clean batches and perturb them, until the program shuts down.
         while True:
-            clean_batch = self._get_data(f'http://{self.host}/clean_batch')
+            batch_id, clean_batch = self._get_data(f'http://{self.host}/clean_batch')
             self._send_data(
                 f'http://{self.host}/adv_batch', 
-                self._attack.perturb(*clean_batch)
+                {
+                    'batch_id': batch_id,
+                    'adv_batch': self._attack.perturb(*clean_batch)
+                }
             )
 
             # Update the model state if a newer one is available.
@@ -55,8 +58,8 @@ class Node:
         return pickle.loads(requests.get(uri, verify=False).content)
 
     @staticmethod
-    def _send_data(uri, data):
-        requests.post(uri, {'data': pickle.dumps(data)}, verify=False)
+    def _send_data(uri, data_dict):
+        requests.post(uri, {k: pickle.dumps(v) for k, v in data_dict}, verify=False)
 
 
 if __name__ == '__main__':
