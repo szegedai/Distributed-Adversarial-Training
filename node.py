@@ -26,14 +26,15 @@ class Node:
         self.host = host
         self.device = torch.device(device)
         self._attack = None
-        self._model = None
         self._model_id = None
 
     def run(self):
         # Request and setup the attack and model objects.
-        self._attack, self._model = self._get_data(f'http://{self.host}/init')
-        self._model.to(self.device)
-        self._attack.model = self._model
+        self._attack = self._get_data(f'http://{self.host}/init')
+        assert hasattr(self._attack, 'model'), 'The attack object must have an attribute named "model"!'
+        assert hasattr(self._attack, 'perturb') and callable(self._attack.perturb), 'The attack object must have a method named "perturb"!'
+        self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+        self._attack.model = self._attack.model.to(self.device)
 
         # Request clean batches and perturb them, until the program shuts down.
         while True:
@@ -46,7 +47,7 @@ class Node:
             # Update the model state if a newer one is available.
             latest_mode_id = self._get_data(f'http://{self.host}/model_id')
             if latest_mode_id != self._model_id:
-                self._model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+                self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
                 self._model_id = latest_mode_id
 
     @staticmethod
@@ -55,7 +56,7 @@ class Node:
 
     @staticmethod
     def _send_data(uri, data):
-        requests.put(uri, pickle.dumps(data), verify=False)
+        requests.post(uri, {'data': pickle.dumps(data)}, verify=False)
 
 
 if __name__ == '__main__':
