@@ -30,7 +30,7 @@ class Node:
 
     def run(self):
         # Request and setup the attack and model objects.
-        self._attack = self._get_data(f'http://{self.host}/init')
+        self._attack = self._get_data(f'http://{self.host}/attack')
         assert hasattr(self._attack, 'model'), 'The attack object must have an attribute named "model"!'
         assert hasattr(self._attack, 'perturb') and callable(self._attack.perturb), 'The attack object must have a method named "perturb"!'
         self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))  # Maybe this line is removable?
