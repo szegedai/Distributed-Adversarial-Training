@@ -1,22 +1,40 @@
+import torch
 import threading
-import queue
 import bottle
 import time
+import pickle
+from heapq import heappush, heappop
 
 
 class Server:
-    def __init__(self, port):
+    # TODO:
+    # 1) Handle data loading into the free queue!
+    # 2) Handle the case when a request comes in before the dataset and dataloader objects are initialised!
+    # 3) Handle the case when dataloader constructuion is called before dataset construction!
+    def __init__(self, port, max_patiente=300):
         self._port = port
+
         self._attack = None
+        self._attack_mutex = threading.Lock()
+        self._latest_model_id = 0
+
         self._dataset = None
         self._dataloader = None
+        self._data_mutex = threading.Lock()
         self._queue_soft_limit = None
+
         self._batch_store = dict()
-        self._free_q = queue.PriorityQueue()  # Need priority so batches that need redistribution, get to the top.
+        self._batch_store_mutex = threading.Lock()
+
+        self._free_q = list()  # Need priority so batches that need redistribution, get to the top.
         self._working_q = dict()  # Fast access when searching for specific batch id and iterable to check for timeouts (this needs a lock).
-        self._done_q = queue.PriorityQueue()  # Need priority so batches that were redistributed, get to the top.
+        self._done_q = list()  # Need priority so batches that were redistributed, get to the top.
+        self._free_q_mutex = threading.Lock()
         self._working_q_mutex = threading.Lock()
-        self._latest_unused_id = 0
+        self._done_q_mutex = threading.Lock()
+
+        self._latest_unused_batch_id = 0
+        self._max_patiente = max_patiente
 
         self._request_handler_thread = threading.Thread(target=self._run_request_handler, daemon=True)
         self._timeout_handler_thread = threading.Thread(target=self._run_timeout_handler, daemon=True)
@@ -50,53 +68,87 @@ class Server:
     def _run_timeout_handler(self):
         while True:
             time.sleep(1)
-            # TODO: Check if working queue has batches that run out of time.
-            # If working queue is empty, do nothing.
+            # Check if working queue has batches that run out of time.
             # If a batch is expired, pop it from the working queue and add it to the free queue.
+            with self._working_q_mutex, self._free_q_mutex:
+                for batch_id in list(self._working_q.keys()):
+                    if self._working_q[batch_id] - time.time() > self._max_patiente:
+                        del self._working_q[batch_id]
+                        heappush(self._free_q, batch_id)
 
     def _on_get_attack(self):
-        # TODO: Send the current attack object. (It includes the current model object as well.)
-        pass
+        # Send the current attack object. (It includes the current model object as well.)
+        with self._attack_mutex:
+            return pickle.dumps(self._attack)
 
     def _on_post_attack(self):
-        # TODO: Override the current attack object with the recievd one. (It includes the new model object as well.)
+        # Override the current attack object with the recieved one. (It includes the new model object as well.)
         # Check if attack has "model" attribute and "perturb" method!
-        pass
+        attack = pickle.loads(bottle.request.POST('attack'))
+        assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
+        assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
+        with self._attack_mutex:
+            self._attack = attack
+            # Maybe add: self._attack.model.cpu() ???
 
     def _on_get_clean_batch(self):
-        # TODO: Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
-        pass
+        # Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
+        with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex:
+            batch_id = heappop(self._free_q)
+            self._working_q[batch_id] = time.time()
+            return pickle.dumps([batch_id, self._batch_store[batch_id]])
 
     def _on_get_adv_batch(self):
-        # TODO: Pop a batch from the done queue and send it.
-        pass
+        # Pop a batch id from the done queue, remove it from the batch store and send it.
+        with self._done_q_mutex, self._batch_store_mutex:
+            batch_id = heappop(self._done_q)
+            return pickle.dumps(self._batch_store.pop(batch_id))
 
     def _on_post_adv_batch(self):
-        # TODO: Move the recieved batch from the woring queue to the done queue (using the also recieved batch id).
-        # If time expired maximum patiente time, drop recieved batch and move it ti the free queue.
+        # Move the recieved batch id from the woring queue to the done queue and override the batch in the batch store.
         # If done queue reached soft limit, drop recieved batch and move it to the free queue.
         # If the recieved batch is not in the working queue, drop it and do nothing.
-        pass
+        # It is not needed to check if the batch is expired, since in the worst case scenario, at max 1 sec has 
+        # passed since the last check and getting 1 sec over the max patiente is acceptable.
+        batch_id = pickle.loads(bottle.request.POST['batch_id'])
+        batch = pickle.loads(bottle.request.POST['batch'])
+        with self._done_q_mutex, self._working_q_mutex:
+            if not (batch_id in self._working_q and len(self._done_q) < self._queue_soft_limit):
+                return
+        with self._done_q_mutex, self._working_q_mutex, self._batch_store_mutex:
+            del self._working_q[batch_id]
+            self._batch_store[batch_id] = batch
+            heappush(self._done_q, batch_id)
 
     def _on_get_model_id(self):
-        # TODO: Send the latest model id.
-        pass
+        # Send the latest model id.
+        with self._attack_mutex:
+            return pickle.dumps(self._latest_model_id)
 
     def _on_get_model_state(self):
-        # TODO: Send the state_dict of the latest model.
-        pass
+        # Send the state_dict of the latest model.
+        with self._attack_mutex:
+            return pickle.dumps(self._attack.model.state_dict())
 
     def _on_post_model_state(self):
-        # TODO: Update the current model with the recieved new model state_dict.
-        pass
+        # Update the current model with the recieved new model state_dict.
+        with self._attack_mutex:
+            state = pickle.loads(bottle.request.POST['model_state'])
+            self._attack.model.load_state_dict(state)
+            self._latest_model_id += 1
 
     def _on_post_dataset(self):
-        # TODO: Construct the dataset object using the recieved class and arguments.
-        pass
+        # Construct the dataset object using the recieved class and arguments.
+        with self._data_mutex:
+            dataset_class = pickle.loads(bottle.request.POST['dataset_class'])
+            kwargs = pickle.loads(bottle.request.POST['kwargs'])
+            self._dataset = dataset_class(**kwargs)
 
     def _on_post_dataloader(self):
-        # TODO: Construct the dataloader object using the dataset object and the recieved arguments.
-        pass
+        # Construct the dataloader object using the dataset object and the recieved arguments.
+        with self._data_mutex:
+            kwargs = pickle.loads(bottle.request.POST['kwargs'])
+            self._dataloader = torch.utils.data.DataLoader(**kwargs)
 
 
 if __name__ == '__main__':
