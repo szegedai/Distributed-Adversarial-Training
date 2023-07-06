@@ -77,6 +77,7 @@ class Server:
         bottle.post(self._on_post_model_state, '/model_state')
         bottle.post(self._on_post_dataset, '/dataset')
         bottle.post(self._on_post_dataloader, '/dataloader')
+        bottle.get(self._on_get_num_batches, '/num_batches')
 
         # TODO: Change the bottle server backend from "wsgiref" to something else that is multithreaded!
         bottle.run(host='0.0.0.0', port=self._port, quiet=True, server='wsgiref')
@@ -176,6 +177,12 @@ class Server:
         # Preload batches as fast as possible to not starve the nodes on startup.
         for _ in range(self._queue_soft_limit):
             self._load_batch()
+
+    def _on_get_num_batches(self):
+        with self._data_mutex:
+            if self._dataloader:
+                return pickle.dumps(len(self._dataloader))
+            return pickle.dumps(-1)
 
 
 
