@@ -3,15 +3,15 @@ import threading
 import bottle
 import time
 import pickle
+import argparse
 from heapq import heappush, heappop
 
 
 class Server:
     # TODO:
-    # 1) Handle data loading into the free queue!
     # 2) Handle the case when a request comes in before the dataset and dataloader objects are initialised!
     # 3) Handle the case when dataloader constructuion is called before dataset construction!
-    def __init__(self, port, max_patiente=300):
+    def __init__(self, port):
         self._port = int(port)
 
         self._attack = None
@@ -35,7 +35,7 @@ class Server:
         self._done_q_mutex = threading.Lock()
 
         self._latest_unused_batch_id = 0
-        self._max_patiente = max_patiente
+        self._max_patiente = None
 
         self._dataloader_thread = threading.Thread(target=self._run_dataloder, daemon=True)
         self._timeout_handler_thread = threading.Thread(target=self._run_timeout_handler, daemon=True)
@@ -169,6 +169,8 @@ class Server:
             self._done_q.clear()
             self._batch_store.clear()
             kwargs = pickle.loads(bottle.request.POST['kwargs'])
+            self._max_patiente = kwargs.pop('max_patiente')
+            self._queue_soft_limit = kwargs.pop('queue_soft_limit')
             self._dataloader = torch.utils.data.DataLoader(**kwargs)
             self._dataloader_iter = iter(self._dataloader)
         # Preload batches as fast as possible to not starve the nodes on startup.
@@ -178,6 +180,19 @@ class Server:
 
 
 if __name__ == '__main__':
-    # TODO: Parse arguments and start the server.
-    Server('8080').run()
+    # Parse arguments and start the server.
+    parser = argparse.ArgumentParser(
+        prog='Server',
+        description='Execution server for distributed adversarial training.'
+    )
+    parser.add_argument(
+        'port',
+        nargs='?',
+        type=int,
+        default=8080,
+        help='Port number to use for communication.'
+    )
+    args = vars(parser.parse_args())
+    
+    Server(**args).run()
 
