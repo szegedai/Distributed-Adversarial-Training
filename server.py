@@ -12,7 +12,7 @@ class Server:
     # 2) Handle the case when a request comes in before the dataset and dataloader objects are initialised!
     # 3) Handle the case when dataloader constructuion is called before dataset construction!
     def __init__(self, port, max_patiente=300):
-        self._port = port
+        self._port = int(port)
 
         self._attack = None
         self._attack_mutex = threading.Lock()
@@ -20,6 +20,7 @@ class Server:
 
         self._dataset = None
         self._dataloader = None
+        self._dataloader_iter = None
         self._data_mutex = threading.Lock()
         self._queue_soft_limit = None
 
@@ -36,19 +37,34 @@ class Server:
         self._latest_unused_batch_id = 0
         self._max_patiente = max_patiente
 
-        self._request_handler_thread = threading.Thread(target=self._run_request_handler, daemon=True)
+        self._dataloader_thread = threading.Thread(target=self._run_dataloder, daemon=True)
         self._timeout_handler_thread = threading.Thread(target=self._run_timeout_handler, daemon=True)
         
     def run(self):
-        self._request_handler_thread.start()
+        self._dataloader_thread.start()
         self._timeout_handler_thread.start()
+        self._run_request_handler()
 
-        # The program only gets through any of the following two lines if an unexpected error is raised on the threads.
-        # TODO: Handle errors!
-        self._request_handler_thread.join()
-        self._timeout_handler_thread.join()
-        print('The server has stopped!')
+    def _load_batch(self):
+        with self._data_mutex, self._batch_store_mutex, self._free_q_mutex:
+            if len(self._free_q) < self._queue_soft_limit:
+                try:
+                    batch = next(self._dataloader_iter)
+                except StopIteration:
+                    self._dataloader_iter = iter(self._dataloader)
+                    batch = next(self._dataloader_iter)
+                id = self._latest_unused_batch_id
+                self._latest_unused_batch_id += 1
+                self._batch_store[id] = batch
+                heappush(self._free_q, id)
 
+
+    def _run_dataloder(self):
+        # Keep the free queue filled.
+        while True:
+            time.sleep(1)  # This is to not kepp the cpu core utulisation on max.
+            if self._dataloader_iter:
+                self._load_batch()
 
     def _run_request_handler(self):
         bottle.get(self._on_get_attack, '/attack')
@@ -146,9 +162,19 @@ class Server:
 
     def _on_post_dataloader(self):
         # Construct the dataloader object using the dataset object and the recieved arguments.
-        with self._data_mutex:
+        # Clear the batch store and all queues since a new dataloader was given so the ongoing and done batches are irrelevant.
+        with self._data_mutex, self._batch_store_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex:
+            self._free_q.clear()
+            self._working_q.clear()
+            self._done_q.clear()
+            self._batch_store.clear()
             kwargs = pickle.loads(bottle.request.POST['kwargs'])
             self._dataloader = torch.utils.data.DataLoader(**kwargs)
+            self._dataloader_iter = iter(self._dataloader)
+        # Preload batches as fast as possible to not starve the nodes on startup.
+        for _ in range(self._queue_soft_limit):
+            self._load_batch()
+
 
 
 if __name__ == '__main__':
