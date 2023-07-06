@@ -43,7 +43,7 @@ class Node:
                 f'http://{self.host}/adv_batch', 
                 {
                     'batch_id': batch_id,
-                    'adv_batch': self._attack.perturb(*clean_batch)
+                    'batch': self._attack.perturb(*clean_batch)
                 }
             )
 
