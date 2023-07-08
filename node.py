@@ -1,5 +1,5 @@
 import torch
-import pickle
+import dill
 import requests
 import argparse
 import json
@@ -41,10 +41,10 @@ class Node:
             batch_id, clean_batch = self._get_data(f'http://{self.host}/clean_batch')
             self._send_data(
                 f'http://{self.host}/adv_batch', 
-                {
-                    'batch_id': batch_id,
-                    'batch': self._attack.perturb(*clean_batch)
-                }
+                [
+                    batch_id,
+                    self._attack.perturb(*clean_batch)
+                ]
             )
 
             # Update the model state if a newer one is available.
@@ -55,11 +55,11 @@ class Node:
 
     @staticmethod
     def _get_data(uri):
-        return pickle.loads(requests.get(uri, verify=False).content)
+        return dill.loads(requests.get(uri, verify=False).content)
 
     @staticmethod
-    def _send_data(uri, data_dict):
-        requests.post(uri, {k: pickle.dumps(v) for k, v in data_dict}, verify=False)
+    def _send_data(uri, data):
+        requests.post(uri, data=dill.dumps(data), verify=False)
 
 
 if __name__ == '__main__':
