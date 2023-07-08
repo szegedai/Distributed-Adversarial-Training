@@ -15,8 +15,9 @@ class Server:
         self._port = int(port)
 
         self._attack = None
+        self._latest_attack_id = -1
         self._attack_mutex = threading.Lock()
-        self._latest_model_id = 0
+        self._latest_model_id = -1
 
         self._dataset = None
         self._dataloader = None
@@ -72,7 +73,7 @@ class Server:
         bottle.get(self._on_get_clean_batch, '/clean_batch')
         bottle.get(self._on_get_adv_batch, '/adv_batch')
         bottle.post(self._on_post_adv_batch, '/adv_batch')
-        bottle.get(self._on_get_model_id, '/model_id')
+        bottle.get(self._on_get_ids, '/ids')
         bottle.get(self._on_get_model_state, '/model_state')
         bottle.post(self._on_post_model_state, '/model_state')
         bottle.post(self._on_post_dataset, '/dataset')
@@ -104,9 +105,14 @@ class Server:
         attack = dill.loads(bottle.request.body.read())
         assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
         assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
-        with self._attack_mutex:
+        with self._attack_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex:
             self._attack = attack
             # Maybe add: self._attack.model.cpu() ???
+            self._latest_attack_id += 1
+            # Drop batches precomputed with the old attack. 
+            self._free_q.clear()
+            self._working_q.clear()
+            self._done_q.clear()
 
     def _on_get_clean_batch(self):
         # Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
@@ -136,10 +142,10 @@ class Server:
             self._batch_store[batch_id] = batch
             heappush(self._done_q, batch_id)
 
-    def _on_get_model_id(self):
-        # Send the latest model id.
+    def _on_get_ids(self):
+        # Send the latest attack and model ids.
         with self._attack_mutex:
-            return dill.dumps(self._latest_model_id)
+            return dill.dumps([self._latest_attack_id, self._latest_model_id])
 
     def _on_get_model_state(self):
         # Send the state_dict of the latest model.
@@ -156,8 +162,8 @@ class Server:
     def _on_post_dataset(self):
         # Construct the dataset object using the recieved class and arguments.
         with self._data_mutex:
-            dataset_class, kwargs = dill.loads(bottle.request.body.read())
-            self._dataset = dataset_class(**kwargs)
+            dataset_class, args, kwargs = dill.loads(bottle.request.body.read())
+            self._dataset = dataset_class(*args, **kwargs)
 
     def _on_post_dataloader(self):
         # Construct the dataloader object using the dataset object and the recieved arguments.
@@ -167,8 +173,8 @@ class Server:
             self._working_q.clear()
             self._done_q.clear()
             self._batch_store.clear()
-            kwargs, self._max_patiente, self._queue_soft_limit = dill.loads(bottle.request.body.read())
-            self._dataloader = torch.utils.data.DataLoader(**kwargs)
+            args, kwargs, self._max_patiente, self._queue_soft_limit = dill.loads(bottle.request.body.read())
+            self._dataloader = torch.utils.data.DataLoader(*args, **kwargs)
             self._dataloader_iter = iter(self._dataloader)
         # Preload batches as fast as possible to not starve the nodes on startup.
         for _ in range(self._queue_soft_limit):
