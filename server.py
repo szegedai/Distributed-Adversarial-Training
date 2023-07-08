@@ -2,7 +2,7 @@ import torch
 import threading
 import bottle
 import time
-import pickle
+import dill
 import argparse
 from heapq import heappush, heappop
 
@@ -96,12 +96,12 @@ class Server:
     def _on_get_attack(self):
         # Send the current attack object. (It includes the current model object as well.)
         with self._attack_mutex:
-            return pickle.dumps(self._attack)
+            return dill.dumps(self._attack)
 
     def _on_post_attack(self):
         # Override the current attack object with the recieved one. (It includes the new model object as well.)
         # Check if attack has "model" attribute and "perturb" method!
-        attack = pickle.loads(bottle.request.POST('attack'))
+        attack = dill.loads(bottle.request.body.read())
         assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
         assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
         with self._attack_mutex:
@@ -113,13 +113,13 @@ class Server:
         with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex:
             batch_id = heappop(self._free_q)
             self._working_q[batch_id] = time.time()
-            return pickle.dumps([batch_id, self._batch_store[batch_id]])
+            return dill.dumps([batch_id, self._batch_store[batch_id]])
 
     def _on_get_adv_batch(self):
         # Pop a batch id from the done queue, remove it from the batch store and send it.
         with self._done_q_mutex, self._batch_store_mutex:
             batch_id = heappop(self._done_q)
-            return pickle.dumps(self._batch_store.pop(batch_id))
+            return dill.dumps(self._batch_store.pop(batch_id))
 
     def _on_post_adv_batch(self):
         # Move the recieved batch id from the woring queue to the done queue and override the batch in the batch store.
@@ -127,8 +127,7 @@ class Server:
         # If the recieved batch is not in the working queue, drop it and do nothing.
         # It is not needed to check if the batch is expired, since in the worst case scenario, at max 1 sec has 
         # passed since the last check and getting 1 sec over the max patiente is acceptable.
-        batch_id = pickle.loads(bottle.request.POST['batch_id'])
-        batch = pickle.loads(bottle.request.POST['batch'])
+        batch_id, batch = dill.loads(bottle.request.body.read())
         with self._done_q_mutex, self._working_q_mutex:
             if not (batch_id in self._working_q and len(self._done_q) < self._queue_soft_limit):
                 return
@@ -140,25 +139,24 @@ class Server:
     def _on_get_model_id(self):
         # Send the latest model id.
         with self._attack_mutex:
-            return pickle.dumps(self._latest_model_id)
+            return dill.dumps(self._latest_model_id)
 
     def _on_get_model_state(self):
         # Send the state_dict of the latest model.
         with self._attack_mutex:
-            return pickle.dumps(self._attack.model.state_dict())
+            return dill.dumps(self._attack.model.state_dict())
 
     def _on_post_model_state(self):
         # Update the current model with the recieved new model state_dict.
         with self._attack_mutex:
-            state = pickle.loads(bottle.request.POST['model_state'])
+            state = dill.loads(bottle.request.body.read())
             self._attack.model.load_state_dict(state)
             self._latest_model_id += 1
 
     def _on_post_dataset(self):
         # Construct the dataset object using the recieved class and arguments.
         with self._data_mutex:
-            dataset_class = pickle.loads(bottle.request.POST['dataset_class'])
-            kwargs = pickle.loads(bottle.request.POST['kwargs'])
+            dataset_class, kwargs = dill.loads(bottle.request.body.read())
             self._dataset = dataset_class(**kwargs)
 
     def _on_post_dataloader(self):
@@ -169,9 +167,7 @@ class Server:
             self._working_q.clear()
             self._done_q.clear()
             self._batch_store.clear()
-            kwargs = pickle.loads(bottle.request.POST['kwargs'])
-            self._max_patiente = kwargs.pop('max_patiente')
-            self._queue_soft_limit = kwargs.pop('queue_soft_limit')
+            kwargs, self._max_patiente, self._queue_soft_limit = dill.loads(bottle.request.body.read())
             self._dataloader = torch.utils.data.DataLoader(**kwargs)
             self._dataloader_iter = iter(self._dataloader)
         # Preload batches as fast as possible to not starve the nodes on startup.
@@ -181,8 +177,8 @@ class Server:
     def _on_get_num_batches(self):
         with self._data_mutex:
             if self._dataloader:
-                return pickle.dumps(len(self._dataloader))
-            return pickle.dumps(-1)
+                return dill.dumps(len(self._dataloader))
+            return dill.dumps(-1)
 
 
 
