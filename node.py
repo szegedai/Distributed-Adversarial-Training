@@ -26,18 +26,23 @@ class Node:
         self.host = host
         self.device = torch.device(device)
         self._attack = None
+        self._attack_id = None
         self._model_id = None
 
     def run(self):
-        # Request and setup the attack and model objects.
-        self._attack = self._get_data(f'http://{self.host}/attack')
-        assert hasattr(self._attack, 'model'), 'The attack object must have an attribute named "model"!'
-        assert hasattr(self._attack, 'perturb') and callable(self._attack.perturb), 'The attack object must have a method named "perturb"!'
-        self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))  # Maybe this line is removable?
-        self._attack.model = self._attack.model.to(self.device)
-
-        # Request clean batches and perturb them, until the program shuts down.
         while True:
+            # Update the model state if a newer one is available.
+            latest_attack_id, latest_mode_id = self._get_data(f'http://{self.host}/ids')
+            if latest_attack_id != self._attack_id:
+                self._attack = self._get_data(f'http://{self.host}/attack')
+                self._attack_id = latest_attack_id
+                self._attack.model = self._attack.model.to(self.device)
+            if latest_mode_id != self._model_id:
+                self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+                self._model_id = latest_mode_id
+                self._attack.model = self._attack.model.to(self.device)
+
+            # Request clean batch, perturb it and send back the result.
             batch_id, clean_batch = self._get_data(f'http://{self.host}/clean_batch')
             self._send_data(
                 f'http://{self.host}/adv_batch', 
@@ -46,13 +51,7 @@ class Node:
                     self._attack.perturb(*clean_batch)
                 ]
             )
-
-            # Update the model state if a newer one is available.
-            latest_mode_id = self._get_data(f'http://{self.host}/model_id')
-            if latest_mode_id != self._model_id:
-                self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
-                self._model_id = latest_mode_id
-
+ 
     @staticmethod
     def _get_data(uri):
         return dill.loads(requests.get(uri, verify=False).content)
