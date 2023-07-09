@@ -70,7 +70,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'host', 
         nargs='?', 
-        default='127.0.0.1', 
+        default='127.0.0.1:8080', 
         help='The IP address of the Execution Server to connect.'
     )
     parser.add_argument(
