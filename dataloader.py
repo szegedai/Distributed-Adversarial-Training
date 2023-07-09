@@ -1,56 +1,52 @@
 import requests
 import dill
+import time
 
 
 class DistributedAdversarialDataLoader:
-    def __init__(self, host, num_preprocessed_batches=10, max_batch_wait_time=300):
+    # TODO: Added proper error messages when the setup process is incorrect!
+    def __init__(self, host, autoupdate_model=True, num_preprocessed_batches=10, max_batch_wait_time=300):
         self._host = host
+        self._autoupdate_model = autoupdate_model
         self._queue_soft_limit = num_preprocessed_batches
         self._max_patiente = max_batch_wait_time
+        self._attack = None
         self._num_batches = None
         self._next_batch_idx = 0
 
     def update_dataset(self, dataset_class, *dataset_args, **dataset_kwargs):
-        requests.post(
-            f'http://{self._host}/dataset', 
-            data=dill.dumps([
+        self._send_data(
+            f'http://{self._host}/dataset',
+            [
                 dataset_class,
                 dataset_args,
                 dataset_kwargs
-            ]),
-            verify=False
+            ]
         )
 
     def update_dataloader(self, *dataloader_args, **dataloader_kwargs):
-        requests.post(
+        self._send_data(
             f'http://{self._host}/dataloader',
-            data=dill.dumps([
+            [
                 dataloader_args,
                 dataloader_kwargs,
                 self._max_patiente,
                 self._queue_soft_limit
-            ]),
-            verify=False
+            ]
         )
 
     def update_attack(self, attack):
-        requests.post(
-            f'http://{self._host}/attack',
-            data=dill.dumps(attack),
-            verify=False
-        )
+        assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
+        assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
+
+        self._send_data(f'http://{self._host}/attack', attack)
+        self._attack = attack
 
     def update_model_state(self, model_state):
-        requests.post(
-            f'http://{self._host}/model_state',
-            data=dill.dumps(model_state),
-            verify=False
-        )
+        self._send_data(f'http://{self._host}/model_state', model_state)
 
     def __iter__(self):
-        num_batches = dill.loads(requests.get(f'http://{self._host}/num_batches').content)
-        if num_batches <= 0:
-            raise Exception('Can not iterate dataloader on server! (The dataset or the dataloader was probably not initialised.)')
+        num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
         self._num_batches = num_batches
         self._next_batch_idx = 0
         return self
@@ -61,7 +57,34 @@ class DistributedAdversarialDataLoader:
         if self._num_batches == self._next_batch_idx:
             raise StopIteration()
 
-        batch = dill.loads(requests.get(f'http://{self._host}/adv_batch', verify=False).content)
+        batch = self._get_data(f'http://{self._host}/adv_batch', max_retrys=5)
         self._next_batch_idx += 1
+
+        if self._autoupdate_model:
+            self.update_model_state(self._attack.model.state_dict())
+
         return batch
+
+    @staticmethod
+    def _get_data(uri, max_retrys=-1):
+        retry_count = 0
+        while retry_count != max_retrys:
+            response = requests.get(uri, verify=False)
+            if response.status_code == 200:
+                return dill.loads(response.content)
+            time.sleep(1)
+            retry_count += 1
+        raise TimeoutError('Reached the maximum number of retrys while requesting data.')
+
+    @staticmethod
+    def _send_data(uri, data, max_retrys=-1):
+        byte_data = dill.dumps(data)
+        retry_count = 0
+        while retry_count != max_retrys:
+            response = requests.post(uri, data=byte_data, verify=False)
+            if response.status_code == 200:
+                return
+            time.sleep(1)
+            retry_count += 1
+        raise TimeoutError('Reached the maximum number of retrys while sending data.')
 
