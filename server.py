@@ -176,7 +176,7 @@ class Server:
     def _on_post_model_state(self):
         # Update the current model with the recieved new model state_dict.
         with self._attack_mutex:
-            if not self._attack_mutex:
+            if not self._attack:
                 # The attack was not yet initialised!
                 bottle.response.status = 204
                 return
