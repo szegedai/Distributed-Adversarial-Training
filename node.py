@@ -44,12 +44,12 @@ class Node:
                 self._attack.model = self._attack.model.to(self.device)
 
             # Request clean batch, perturb it and send back the result.
-            batch_id, clean_batch = self._get_data(f'http://{self.host}/clean_batch')
+            batch_id, (x, y) = self._get_data(f'http://{self.host}/clean_batch')
             self._send_data(
                 f'http://{self.host}/adv_batch', 
                 [
                     batch_id,
-                    self._attack.perturb(*clean_batch)
+                    (self._attack.perturb(x, y), y)
                 ]
             )
  
