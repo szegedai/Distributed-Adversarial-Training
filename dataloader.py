@@ -21,11 +21,10 @@ class DistributedAdversarialDataLoader:
             verify=False
         )
 
-    def update_dataloader(self, dataloader_class, *dataloader_args, **dataloader_kwargs):
+    def update_dataloader(self, *dataloader_args, **dataloader_kwargs):
         requests.post(
             f'http://{self._host}/dataloader',
             data=dill.dumps([
-                dataloader_class,
                 dataloader_args,
                 dataloader_kwargs,
                 self._max_patiente,
