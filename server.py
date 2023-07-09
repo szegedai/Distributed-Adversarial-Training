@@ -98,6 +98,10 @@ class Server:
     def _on_get_attack(self):
         # Send the current attack object. (It includes the current model object as well.)
         with self._attack_mutex:
+            if not self._attack:
+                # The attack was not yet initialised!
+                bottle.response.status = 204
+                return
             return dill.dumps(self._attack)
 
     def _on_post_attack(self):
@@ -118,6 +122,10 @@ class Server:
     def _on_get_clean_batch(self):
         # Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
         with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex:
+            if not len(self._free_q):
+                # There are no clean batches available, probably because the full initialisation process is not yet finished.
+                bottle.response.status = 204
+                return
             batch_id = heappop(self._free_q)
             self._working_q[batch_id] = time.time()
             return dill.dumps([batch_id, self._batch_store[batch_id]])
@@ -125,6 +133,12 @@ class Server:
     def _on_get_adv_batch(self):
         # Pop a batch id from the done queue, remove it from the batch store and send it.
         with self._done_q_mutex, self._batch_store_mutex:
+            if not len(self._done_q):
+                # There are no adversarial batches available.
+                # This can happen if the initialisation process is not yet finished or 
+                # if the nodes have not yet had enough time to generate new adversarial batches.
+                bottle.response.status = 204
+                return
             batch_id = heappop(self._done_q)
             return dill.dumps(self._batch_store.pop(batch_id))
 
@@ -146,16 +160,27 @@ class Server:
     def _on_get_ids(self):
         # Send the latest attack and model ids.
         with self._attack_mutex:
+            if self._latest_attack_id == -1 and self._latest_model_id == -1:
+                # The server has not yet finished the initialisation process.
+                bottle.response.status = 204
+                return
             return dill.dumps([self._latest_attack_id, self._latest_model_id])
 
     def _on_get_model_state(self):
         # Send the state_dict of the latest model.
+        # No edge case handling is required since if the node requests the model state, it already 
+        # recieved tha latest model id and if the id was to be invalid, the node would have waited for 
+        # a valid id befor requesting the model state.
         with self._attack_mutex:
             return dill.dumps(self._attack.model.state_dict())
 
     def _on_post_model_state(self):
         # Update the current model with the recieved new model state_dict.
         with self._attack_mutex:
+            if not self._attack_mutex:
+                # The attack was not yet initialised!
+                bottle.response.status = 204
+                return
             state = dill.loads(bottle.request.body.read())
             self._attack.model.load_state_dict(state)
             self._latest_model_id += 1
@@ -170,6 +195,10 @@ class Server:
         # Construct the dataloader object using the dataset object and the recieved arguments.
         # Clear the batch store and all queues since a new dataloader was given so the ongoing and done batches are irrelevant.
         with self._data_mutex, self._batch_store_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex:
+            if not self._dataset:
+                # There was no dataset to use for the dataloader.
+                bottle.response.status = 204
+                return
             self._free_q.clear()
             self._working_q.clear()
             self._done_q.clear()
@@ -183,10 +212,11 @@ class Server:
 
     def _on_get_num_batches(self):
         with self._data_mutex:
-            if self._dataloader:
-                return dill.dumps(len(self._dataloader))
-            return dill.dumps(-1)
-
+            if not self._dataloader:
+                # There was no dataloader to use.
+                bottle.response.status = 204
+                return
+            return dill.dumps(len(self._dataloader))
 
 
 if __name__ == '__main__':
