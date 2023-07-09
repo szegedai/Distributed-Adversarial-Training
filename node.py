@@ -4,6 +4,7 @@ import requests
 import argparse
 import json
 import re
+import time
 
 
 class Node:
@@ -53,12 +54,27 @@ class Node:
             )
  
     @staticmethod
-    def _get_data(uri):
-        return dill.loads(requests.get(uri, verify=False).content)
+    def _get_data(uri, max_retrys=-1):
+        retry_count = 0
+        while retry_count != max_retrys:
+            response = requests.get(uri, verify=False)
+            if response.status_code == 200:
+                return dill.loads(response.content)
+            time.sleep(1)
+            retry_count += 1
+        raise TimeoutError('Reached the maximum number of retrys while requesting data.')
 
     @staticmethod
-    def _send_data(uri, data):
-        requests.post(uri, data=dill.dumps(data), verify=False)
+    def _send_data(uri, data, max_retrys=-1):
+        byte_data = dill.dumps(data)
+        retry_count = 0
+        while retry_count != max_retrys:
+            response = requests.post(uri, data=byte_data, verify=False)
+            if response.status_code == 200:
+                return
+            time.sleep(1)
+            retry_count += 1
+        raise TimeoutError('Reached the maximum number of retrys while sending data.')
 
 
 if __name__ == '__main__':
