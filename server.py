@@ -98,10 +98,9 @@ class Server:
     def _on_get_attack(self):
         # Send the current attack object. (It includes the current model object as well.)
         with self._attack_mutex:
-            if not self._attack:
-                # The attack was not yet initialised!
-                bottle.response.status = 204
-                return
+            # No edge case handling is required since if the node requests the attack, it already 
+            # recieved tha latest attack id and if the id was to be invalid, the node would have waited for 
+            # a valid id befor requesting the attack.
             return dill.dumps(self._attack)
 
     def _on_post_attack(self):
