@@ -68,20 +68,21 @@ class Server:
                 self._load_batch()
 
     def _run_request_handler(self):
-        bottle.get(self._on_get_attack, '/attack')
-        bottle.post(self._on_post_attack, '/attack')
-        bottle.get(self._on_get_clean_batch, '/clean_batch')
-        bottle.get(self._on_get_adv_batch, '/adv_batch')
-        bottle.post(self._on_post_adv_batch, '/adv_batch')
-        bottle.get(self._on_get_ids, '/ids')
-        bottle.get(self._on_get_model_state, '/model_state')
-        bottle.post(self._on_post_model_state, '/model_state')
-        bottle.post(self._on_post_dataset, '/dataset')
-        bottle.post(self._on_post_dataloader, '/dataloader')
-        bottle.get(self._on_get_num_batches, '/num_batches')
+        bottle.get('/attack')(self._on_get_attack)
+        bottle.post('/attack')(self._on_post_attack)
+        bottle.get('/clean_batch')(self._on_get_clean_batch)
+        bottle.get('/adv_batch')(self._on_get_adv_batch)
+        bottle.post('/adv_batch')(self._on_post_adv_batch)
+        bottle.get('/ids')(self._on_get_ids)
+        bottle.get('/model_state')(self._on_get_model_state)
+        bottle.post('/model_state')(self._on_post_model_state)
+        bottle.post('/dataset')(self._on_post_dataset)
+        bottle.post('/dataloader')(self._on_post_dataloader)
+        bottle.get('/num_batches')(self._on_get_num_batches)
 
         # TODO: Change the bottle server backend from "wsgiref" to something else that is multithreaded!
-        bottle.run(host='0.0.0.0', port=self._port, quiet=True, server='wsgiref')
+        bottle.run(host='0.0.0.0', port=self._port, quiet=False, debug=True, server='wsgiref')
+        #bottle.run(host='0.0.0.0', port=self._port, quiet=True, server='wsgiref')
 
     def _run_timeout_handler(self):
         while True:
@@ -174,7 +175,7 @@ class Server:
             self._done_q.clear()
             self._batch_store.clear()
             args, kwargs, self._max_patiente, self._queue_soft_limit = dill.loads(bottle.request.body.read())
-            self._dataloader = torch.utils.data.DataLoader(*args, **kwargs)
+            self._dataloader = torch.utils.data.DataLoader(self._dataset, *args, **kwargs)
             self._dataloader_iter = iter(self._dataloader)
         # Preload batches as fast as possible to not starve the nodes on startup.
         for _ in range(self._queue_soft_limit):
