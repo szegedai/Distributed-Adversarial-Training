@@ -145,12 +145,15 @@ class Server:
         # Move the recieved batch id from the woring queue to the done queue and override the batch in the batch store.
         # If done queue reached soft limit, drop recieved batch and move it to the free queue.
         # If the recieved batch is not in the working queue, drop it and do nothing.
-        # It is not needed to check if the batch is expired, since in the worst case scenario, at max 1 sec has 
-        # passed since the last check and getting 1 sec over the max patiente is acceptable.
+        # If the batch has expired, remove it from the working queue and add it to the free queue.
         batch_id, batch = dill.loads(bottle.request.body.read())
         with self._done_q_mutex, self._working_q_mutex:
             if not (batch_id in self._working_q and len(self._done_q) < self._queue_soft_limit):
                 return
+        with self._working_q_mutex, self._free_q_mutex, self._attack_mutex:
+            if self._working_q[batch_id] - self._latest_model_id > self._max_patiente:
+                        del self._working_q[batch_id]
+                        heappush(self._free_q, batch_id)
         with self._done_q_mutex, self._working_q_mutex, self._batch_store_mutex:
             del self._working_q[batch_id]
             self._batch_store[batch_id] = batch
