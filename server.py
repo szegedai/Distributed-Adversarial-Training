@@ -89,9 +89,9 @@ class Server:
             time.sleep(1)
             # Check if working queue has batches that run out of time.
             # If a batch is expired, pop it from the working queue and add it to the free queue.
-            with self._working_q_mutex, self._free_q_mutex:
+            with self._working_q_mutex, self._free_q_mutex, self._attack_mutex:
                 for batch_id in list(self._working_q.keys()):
-                    if self._working_q[batch_id] - time.time() > self._max_patiente:
+                    if self._working_q[batch_id] - self._latest_model_id > self._max_patiente:
                         del self._working_q[batch_id]
                         heappush(self._free_q, batch_id)
 
@@ -120,13 +120,13 @@ class Server:
 
     def _on_get_clean_batch(self):
         # Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
-        with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex:
+        with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex, self._attack_mutex:
             if not len(self._free_q):
                 # There are no clean batches available, probably because the full initialisation process is not yet finished.
                 bottle.response.status = 204
                 return
             batch_id = heappop(self._free_q)
-            self._working_q[batch_id] = time.time()
+            self._working_q[batch_id] = self._latest_model_id
             return dill.dumps([batch_id, self._batch_store[batch_id]])
 
     def _on_get_adv_batch(self):
