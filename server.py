@@ -152,8 +152,9 @@ class Server:
                 return
         with self._working_q_mutex, self._free_q_mutex, self._attack_mutex:
             if self._working_q[batch_id] - self._latest_model_id > self._max_patiente:
-                        del self._working_q[batch_id]
-                        heappush(self._free_q, batch_id)
+                del self._working_q[batch_id]
+                heappush(self._free_q, batch_id)
+                return
         with self._done_q_mutex, self._working_q_mutex, self._batch_store_mutex:
             del self._working_q[batch_id]
             self._batch_store[batch_id] = batch
