@@ -38,34 +38,23 @@ class Server:
         self._latest_unused_batch_id = 0
         self._max_patiente = None
 
-        self._dataloader_thread = threading.Thread(target=self._run_dataloder, daemon=True)
         self._timeout_handler_thread = threading.Thread(target=self._run_timeout_handler, daemon=True)
         
     def run(self):
-        self._dataloader_thread.start()
         self._timeout_handler_thread.start()
         self._run_request_handler()
 
     def _load_batch(self):
         with self._data_mutex, self._batch_store_mutex, self._free_q_mutex:
-            if len(self._free_q) < self._queue_soft_limit:
-                try:
-                    batch = next(self._dataloader_iter)
-                except StopIteration:
-                    self._dataloader_iter = iter(self._dataloader)
-                    batch = next(self._dataloader_iter)
-                id = self._latest_unused_batch_id
-                self._latest_unused_batch_id += 1
-                self._batch_store[id] = batch
-                heappush(self._free_q, id)
-
-
-    def _run_dataloder(self):
-        # Keep the free queue filled.
-        while True:
-            time.sleep(1)  # This is to not kepp the cpu core utulisation on max.
-            if self._dataloader_iter:
-                self._load_batch()
+            try:
+                batch = next(self._dataloader_iter)
+            except StopIteration:
+                self._dataloader_iter = iter(self._dataloader)
+                batch = next(self._dataloader_iter)
+            id = self._latest_unused_batch_id
+            self._latest_unused_batch_id += 1
+            self._batch_store[id] = batch
+            heappush(self._free_q, id)
 
     def _run_request_handler(self):
         bottle.get('/attack')(self._on_get_attack)
@@ -86,7 +75,7 @@ class Server:
 
     def _run_timeout_handler(self):
         while True:
-            time.sleep(1)
+            time.sleep(2)
             # Check if working queue has batches that run out of time.
             # If a batch is expired, pop it from the working queue and add it to the free queue.
             with self._working_q_mutex, self._free_q_mutex, self._attack_mutex:
@@ -159,6 +148,7 @@ class Server:
             del self._working_q[batch_id]
             self._batch_store[batch_id] = batch
             heappush(self._done_q, batch_id)
+        self._load_batch()
 
     def _on_get_ids(self):
         # Send the latest attack and model ids.
