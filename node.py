@@ -6,7 +6,6 @@ import json
 import re
 import time
 
-
 class Node:
     # Consider adding support for HTTPS too!
     # TODO: Manage the scenario when the node is not able to access the server temporarily.
@@ -45,6 +44,11 @@ class Node:
 
             # Request clean batch, perturb it and send back the result.
             batch_id, (x, y) = self._get_data(f'http://{self.host}/clean_batch')
+
+            #!!! Note it's an update
+            x = x.to(self.device)
+            y = y.to(self.device)
+
             self._send_data(
                 f'http://{self.host}/adv_batch', 
                 [
