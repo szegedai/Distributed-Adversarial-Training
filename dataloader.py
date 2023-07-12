@@ -2,7 +2,6 @@ import requests
 import dill
 import time
 
-
 class DistributedAdversarialDataLoader:
     # TODO: Added proper error messages when the setup process is incorrect!
     def __init__(self, host, autoupdate_model=True, num_preprocessed_batches=10, max_batch_wait_time=300):
@@ -64,6 +63,11 @@ class DistributedAdversarialDataLoader:
             self.update_model_state(self._attack.model.state_dict())
 
         return batch
+
+    #!!! Note it's an update
+    def __len__(self):
+        self._num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
+        return self._num_batches
 
     @staticmethod
     def _get_data(uri, max_retrys=-1):
