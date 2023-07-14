@@ -34,18 +34,19 @@ class Node:
             # Update the model state if a newer one is available.
             latest_attack_id, latest_mode_id = self._get_data(f'http://{self.host}/ids')
             if latest_attack_id != self._attack_id:
-                self._attack = self._get_data(f'http://{self.host}/attack')
+                attack_class, attack_args, attack_kwargs = self._get_data(f'http://{self.host}/attack')
+                for arg in attack_args:
+                    if isinstance(arg, torch.nn.Module):
+                        arg.to(self.device)
+                self._attack = attack_class(*attack_args, **attack_kwargs)
                 self._attack_id = latest_attack_id
-                self._attack.model = self._attack.model.to(self.device)
             if latest_mode_id != self._model_id:
-                self._attack.model.load_state_dict(self._get_data(f'http://{self.host}/model_state'))
+                self._attack.model = self._get_data(f'http://{self.host}/model')
+                self._attack.model.to(self.device)
                 self._model_id = latest_mode_id
-                self._attack.model = self._attack.model.to(self.device)
 
             # Request clean batch, perturb it and send back the result.
             batch_id, (x, y) = self._get_data(f'http://{self.host}/clean_batch')
-
-            #!!! Note it's an update
             x = x.to(self.device)
             y = y.to(self.device)
 

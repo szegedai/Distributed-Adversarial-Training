@@ -2,9 +2,9 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
-import torchvision.transforms as transforms
 
-from Dataloader.dataloader import DistributedAdversarialDataLoader
+#from Dataloader.dataloader import DistributedAdversarialDataLoader
+from dataloader import DistributedAdversarialDataLoader
 
 class LinfPGDAttack:
     def __init__(self, model, loss_fn, eps, step_size, num_steps, random_start=True, bounds=(0.0, 1.0)):
@@ -39,19 +39,10 @@ class LinfPGDAttack:
         return x + delta
 
 def main():
-    device = torch.device('cuda:0')
+    data_path = '../cifar_data/cifar10'
+    device = torch.device('cpu')
 
-    CIFAR10_STATS = {
-        'means': (0.4914, 0.4822, 0.4465),
-        'stds': (0.2470, 0.2435, 0.2616)
-    }
-
-    net = torchvision.models.resnet18(num_classes=10)
-    net.fc = nn.Linear(512, 10)
-
-    net = net.to(device)
-
-    attack = LinfPGDAttack(net, torch.nn.CrossEntropyLoss(), 8/255, 2/255, 10)
+    net = torchvision.models.resnet18(num_classes=10).to(device)
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -60,10 +51,18 @@ def main():
     ])
 
     train_loader = DistributedAdversarialDataLoader('127.0.0.1:8080')
-    train_loader.update_attack(attack)
+    train_loader.update_attack(
+        LinfPGDAttack,
+        net,
+        torch.nn.CrossEntropyLoss(),
+        8 / 255,
+        2 / 255,
+        10
+    )
+    train_loader.update_model(net)
     train_loader.update_dataset(
         torchvision.datasets.CIFAR10, 
-        './cifar_data/cifar10', 
+        data_path, 
         train=True, 
         transform=train_transform, 
         download=True)
@@ -76,23 +75,10 @@ def main():
         persistent_workers=True
     )
     
+    '''
     test_loader = torch.utils.data.DataLoader(
         torchvision.datasets.CIFAR10(
-            './cifar_data/cifar10', 
-            train=False, 
-            download=True,
-            transform=torchvision.transforms.ToTensor()
-        ), 
-        batch_size=128, 
-        shuffle=False, 
-        num_workers=2, 
-        multiprocessing_context='spawn', 
-        persistent_workers=True
-    )
-
-    test_loader = torch.utils.data.DataLoader(
-        torchvision.datasets.CIFAR10(
-            './cifar_data/cifar10', 
+            data_path, 
             train=False, 
             download=True
         ), 
@@ -102,6 +88,7 @@ def main():
         multiprocessing_context='spawn', 
         persistent_workers=True
     )
+    '''
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)

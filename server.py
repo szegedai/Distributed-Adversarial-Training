@@ -14,10 +14,12 @@ class Server:
     def __init__(self, port):
         self._port = int(port)
 
-        self._attack = None
+        self._attack_info = None
         self._latest_attack_id = -1
         self._attack_mutex = threading.Lock()
+        self._model = None
         self._latest_model_id = -1
+        self._model_mutex = threading.Lock()
 
         self._dataset = None
         self._dataloader = None
@@ -26,7 +28,9 @@ class Server:
         self._queue_soft_limit = None
 
         self._batch_store = dict()
+        self._old_batch_store = dict()  # stores the unperturbed batches in case the batches in the done queue has to be redone.
         self._batch_store_mutex = threading.Lock()
+        self._old_batch_sotre_mutex = threading.Lock()
 
         self._free_q = list()  # Need priority so batches that need redistribution, get to the top.
         self._working_q = dict()  # Fast access when searching for specific batch id and iterable to check for timeouts (this needs a lock).
@@ -63,8 +67,8 @@ class Server:
         bottle.get('/adv_batch')(self._on_get_adv_batch)
         bottle.post('/adv_batch')(self._on_post_adv_batch)
         bottle.get('/ids')(self._on_get_ids)
-        bottle.get('/model_state')(self._on_get_model_state)
-        bottle.post('/model_state')(self._on_post_model_state)
+        bottle.get('/model')(self._on_get_model)
+        bottle.post('/model')(self._on_post_model)
         bottle.post('/dataset')(self._on_post_dataset)
         bottle.post('/dataloader')(self._on_post_dataloader)
         bottle.get('/num_batches')(self._on_get_num_batches)
@@ -85,31 +89,28 @@ class Server:
                         heappush(self._free_q, batch_id)
 
     def _on_get_attack(self):
-        # Send the current attack object. (It includes the current model object as well.)
+        # Send the current attack class and arguments.
         with self._attack_mutex:
-            # No edge case handling is required since if the node requests the attack, it already 
-            # recieved tha latest attack id and if the id was to be invalid, the node would have waited for 
-            # a valid id befor requesting the attack.
-            return dill.dumps(self._attack)
+            return dill.dumps(self._attack_info)
 
     def _on_post_attack(self):
-        # Override the current attack object with the recieved one. (It includes the new model object as well.)
-        # Check if attack has "model" attribute and "perturb" method!
-        attack = dill.loads(bottle.request.body.read())
-        assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
-        assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
+        # Override the current attack class and args with the recieved one.
+        attack_info = dill.loads(bottle.request.body.read())
         with self._attack_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex:
-            self._attack = attack
-            # Maybe add: self._attack.model.cpu() ???
+            self._attack_info = attack_info
             self._latest_attack_id += 1
-            # Drop batches precomputed with the old attack. 
-            self._free_q.clear()
+
+            # Move all batches to the free queue to resend them.
+            for batch_id in self._working_q.keys():
+                heappush(self._free_q, batch_id)
+            for batch_id in self._done_q:
+                heappush(self._free_q, batch_id)
             self._working_q.clear()
             self._done_q.clear()
-
+            
     def _on_get_clean_batch(self):
         # Pop a clean batch from the free queue, move it to the working queue and send the batch id and the batch itself.
-        with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex, self._attack_mutex:
+        with self._free_q_mutex, self._working_q_mutex, self._batch_store_mutex, self._model_mutex:
             if not len(self._free_q):
                 # There are no clean batches available, probably because the full initialisation process is not yet finished.
                 bottle.response.status = 204
@@ -120,7 +121,7 @@ class Server:
 
     def _on_get_adv_batch(self):
         # Pop a batch id from the done queue, remove it from the batch store and send it.
-        with self._done_q_mutex, self._batch_store_mutex:
+        with self._done_q_mutex, self._batch_store_mutex, self._old_batch_sotre_mutex:
             if not len(self._done_q):
                 # There are no adversarial batches available.
                 # This can happen if the initialisation process is not yet finished or 
@@ -128,6 +129,7 @@ class Server:
                 bottle.response.status = 204
                 return
             batch_id = heappop(self._done_q)
+            del self._old_batch_store[batch_id]
             return dill.dumps(self._batch_store.pop(batch_id))
 
     def _on_post_adv_batch(self):
@@ -137,52 +139,59 @@ class Server:
         # If the batch has expired, remove it from the working queue and add it to the free queue.
         batch_id, batch = dill.loads(bottle.request.body.read())
         with self._done_q_mutex, self._working_q_mutex:
-            if not (batch_id in self._working_q and len(self._done_q) < self._queue_soft_limit):
+            if not (batch_id in self._working_q):
                 return
-        with self._working_q_mutex, self._free_q_mutex, self._attack_mutex:
-            if self._working_q[batch_id] - self._latest_model_id > self._max_patiente:
+        with self._done_q_mutex, self._working_q_mutex, self._free_q_mutex, self._model_mutex:
+            if self._working_q[batch_id] - self._latest_model_id > self._max_patiente or len(self._done_q) >= self._queue_soft_limit:
                 del self._working_q[batch_id]
                 heappush(self._free_q, batch_id)
                 return
-        with self._done_q_mutex, self._working_q_mutex, self._batch_store_mutex:
+        with self._done_q_mutex, self._working_q_mutex, self._batch_store_mutex, self._old_batch_sotre_mutex:
             del self._working_q[batch_id]
+            self._old_batch_store[batch_id] = self._batch_store[batch_id]
             self._batch_store[batch_id] = batch
             heappush(self._done_q, batch_id)
         self._load_batch()
 
     def _on_get_ids(self):
         # Send the latest attack and model ids.
-        with self._attack_mutex:
+        with self._attack_mutex, self._model_mutex:
             if self._latest_attack_id == -1 and self._latest_model_id == -1:
                 # The server has not yet finished the initialisation process.
                 bottle.response.status = 204
                 return
             return dill.dumps([self._latest_attack_id, self._latest_model_id])
 
-    def _on_get_model_state(self):
-        # Send the state_dict of the latest model.
-        # No edge case handling is required since if the node requests the model state, it already 
-        # recieved tha latest model id and if the id was to be invalid, the node would have waited for 
-        # a valid id befor requesting the model state.
-        with self._attack_mutex:
-            return dill.dumps(self._attack.model.state_dict())
+    def _on_get_model(self):
+        with self._model_mutex:
+            return dill.dumps(self._model)
 
-    def _on_post_model_state(self):
-        # Update the current model with the recieved new model state_dict.
-        with self._attack_mutex:
-            if not self._attack:
-                # The attack was not yet initialised!
-                bottle.response.status = 204
-                return
-            state = dill.loads(bottle.request.body.read())
-            self._attack.model.load_state_dict(state)
+    def _on_post_model(self):
+        with self._model_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex: 
+            self._model, new_architecture = dill.loads(bottle.request.body.read())
             self._latest_model_id += 1
+
+            if new_architecture:
+                # Move all batches to the free queue to resend them.
+                for batch_id in self._working_q.keys():
+                    heappush(self._free_q, batch_id)
+                for batch_id in self._done_q:
+                    heappush(self._free_q, batch_id)
+                self._working_q.clear()
+                self._done_q.clear()
 
     def _on_post_dataset(self):
         # Construct the dataset object using the recieved class and arguments.
-        with self._data_mutex:
+        with self._data_mutex, self._free_q_mutex, self._working_q_mutex, self._done_q_mutex:
             dataset_class, args, kwargs = dill.loads(bottle.request.body.read())
             self._dataset = dataset_class(*args, **kwargs)
+            
+            # Clear all queues and dataloader. The user have to update the dataloader to be able to start working.
+            self._free_q.clear()
+            self._working_q.clear()
+            self._done_q.clear()
+            self._dataloader = None
+            self._dataloader_iter = None
 
     def _on_post_dataloader(self):
         # Construct the dataloader object using the dataset object and the recieved arguments.

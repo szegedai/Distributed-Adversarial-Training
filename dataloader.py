@@ -9,7 +9,7 @@ class DistributedAdversarialDataLoader:
         self._autoupdate_model = autoupdate_model
         self._queue_soft_limit = num_preprocessed_batches
         self._max_patiente = max_batch_wait_time
-        self._attack = None
+        self._model = None
         self._num_batches = None
         self._next_batch_idx = 0
 
@@ -34,19 +34,30 @@ class DistributedAdversarialDataLoader:
             ]
         )
 
-    def update_attack(self, attack):
-        assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
-        assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
+    def update_attack(self, attack_class, *attack_args, **attack_kwargs):
+        #assert hasattr(attack, 'model'), 'The attack object must have an attribute named "model"!'
+        #assert hasattr(attack, 'perturb') and callable(attack.perturb), 'The attack object must have a method named "perturb"!'
+        self._send_data(
+            f'http://{self._host}/attack', 
+            [
+                attack_class,
+                attack_args,
+                attack_kwargs
+            ]
+        )
 
-        self._send_data(f'http://{self._host}/attack', attack)
-        self._attack = attack
-
-    def update_model_state(self, model_state):
-        self._send_data(f'http://{self._host}/model_state', model_state)
+    def update_model(self, model, new_architecture=False):
+        self._send_data(
+            f'http://{self._host}/model', 
+            [
+                model, 
+                new_architecture
+            ]
+        )
+        self._model = model
 
     def __iter__(self):
-        num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
-        self._num_batches = num_batches
+        self._num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
         self._next_batch_idx = 0
         return self
 
@@ -56,17 +67,17 @@ class DistributedAdversarialDataLoader:
         if self._num_batches == self._next_batch_idx:
             raise StopIteration()
 
-        batch = self._get_data(f'http://{self._host}/adv_batch', max_retrys=5)
+        batch = self._get_data(f'http://{self._host}/adv_batch')
         self._next_batch_idx += 1
 
         if self._autoupdate_model:
-            self.update_model_state(self._attack.model.state_dict())
+            self.update_model(self._model)
 
         return batch
 
-    #!!! Note it's an update
     def __len__(self):
-        self._num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
+        if not self._num_batches:
+            self._num_batches = self._get_data(f'http://{self._host}/num_batches', max_retrys=5)
         return self._num_batches
 
     @staticmethod
