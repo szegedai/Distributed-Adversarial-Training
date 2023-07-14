@@ -40,7 +40,7 @@ class LinfPGDAttack:
 
 def main():
     data_path = '../cifar_data/cifar10'
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
 
@@ -66,7 +66,6 @@ def main():
         train=True, 
         transform=train_transform, 
         download=True)
-
     train_loader.update_dataloader(
         batch_size=512, 
         shuffle=True, 
@@ -75,7 +74,6 @@ def main():
         persistent_workers=True
     )
     
-    '''
     test_loader = torch.utils.data.DataLoader(
         torchvision.datasets.CIFAR10(
             data_path, 
@@ -88,7 +86,6 @@ def main():
         multiprocessing_context='spawn', 
         persistent_workers=True
     )
-    '''
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
@@ -130,7 +127,7 @@ def main():
     total = 0
 
     with torch.no_grad():
-        for data in testloader:
+        for data in test_loader:
             images, labels = data
             images, labels = images.to(device), labels.to(device)
 
