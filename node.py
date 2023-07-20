@@ -1,10 +1,10 @@
 import torch
 import dill
-import requests
 import argparse
 import json
 import re
 import time
+import requests
 
 class Node:
     # Consider adding support for HTTPS too!
@@ -30,53 +30,65 @@ class Node:
         self._model_id = None
 
     def run(self):
-        while True:
-            # Update the model state if a newer one is available.
-            latest_attack_id, latest_mode_id = self._get_data(f'http://{self.host}/ids')
-            if latest_attack_id != self._attack_id:
-                attack_class, attack_args, attack_kwargs = self._get_data(f'http://{self.host}/attack')
-                for arg in attack_args:
-                    if isinstance(arg, torch.nn.Module):
-                        arg.to(self.device)
-                self._attack = attack_class(*attack_args, **attack_kwargs)
-                self._attack_id = latest_attack_id
-            if latest_mode_id != self._model_id:
-                self._attack.model = self._get_data(f'http://{self.host}/model')
-                self._attack.model.to(self.device)
-                self._model_id = latest_mode_id
+        # TODO: Handle the case when the connection to the server is lost temporarily and the session closes!
+        with requests.Session() as session:
+            while True:
+                # Update the model and/or attack if a newer one is available.
+                response_bytes = self._get_data(f'http://{self.host}/ids', session)
+                latest_attack_id, latest_mode_id = int.from_bytes(response_bytes[:8], 'big'), int.from_bytes(response_bytes[8:], 'big')
+                if latest_attack_id != self._attack_id:
+                    response_bytes = self._get_data(f'http://{self.host}/attack', session) 
+                    attack_class, attack_args, attack_kwargs = dill.loads(response_bytes)
+                    for arg in attack_args:
+                        if isinstance(arg, torch.nn.Module):
+                            arg.to(self.device)
+                    self._attack = attack_class(*attack_args, **attack_kwargs)
+                    self._attack_id = latest_attack_id
+                if latest_mode_id != self._model_id:
+                    response_bytes = self._get_data(f'http://{self.host}/model', session)
+                    self._attack.model = dill.loads(response_bytes)
+                    self._attack.model.to(self.device)
+                    self._model_id = latest_mode_id
 
-            # Request clean batch, perturb it and send back the result.
-            batch_id, (x, y) = self._get_data(f'http://{self.host}/clean_batch')
-            x = x.to(self.device)
-            y = y.to(self.device)
+                # Request clean batch, perturb it and send back the result.
+                response_bytes = self._get_data(f'http://{self.host}/clean_batch', session)
+                batch_id, (x, y) = int.from_bytes(response_bytes[:8], 'big'), dill.loads(response_bytes[8:])
+                x = x.to(self.device)
+                y = y.to(self.device)
 
-            self._send_data(
-                f'http://{self.host}/adv_batch', 
-                [
-                    batch_id,
-                    (self._attack.perturb(x, y), y)
-                ]
-            )
+                self._send_data(
+                    f'http://{self.host}/adv_batch', 
+                    b''.join((
+                        batch_id.to_bytes(8, 'big'),
+                        dill.dumps((self._attack.perturb(x, y).cpu(), y.cpu()))
+                    )), 
+                    session
+                )
  
     @staticmethod
-    def _get_data(uri, max_retrys=-1):
+    def _get_data(url, session, max_retrys=-1):
         retry_count = 0
         while retry_count != max_retrys:
-            response = requests.get(uri, verify=False)
-            if response.status_code == 200:
-                return dill.loads(response.content)
+            try:
+                response = session.get(url, verify=False)
+                if response.status_code == 200:
+                    return response.content
+            except (TimeoutError, ConnectionError) as e:
+                raise Warning('The following error was raised during a GET request:\n' + str(e))
             time.sleep(1)
             retry_count += 1
         raise TimeoutError('Reached the maximum number of retrys while requesting data.')
 
     @staticmethod
-    def _send_data(uri, data, max_retrys=-1):
-        byte_data = dill.dumps(data)
+    def _send_data(url, data, session, max_retrys=-1):
         retry_count = 0
         while retry_count != max_retrys:
-            response = requests.post(uri, data=byte_data, verify=False)
-            if response.status_code == 200:
-                return
+            try:
+                response = session.post(url, data=data, verify=False)
+                if response.status_code == 200:
+                    return
+            except (TimeoutError, ConnectionError) as e:
+                raise Warning('The following error was raised during a POST request:\n' + str(e))
             time.sleep(1)
             retry_count += 1
         raise TimeoutError('Reached the maximum number of retrys while sending data.')
