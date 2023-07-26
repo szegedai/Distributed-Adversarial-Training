@@ -42,7 +42,7 @@ def main():
     data_path = 'path/to/imagenet'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    net = torchvision.models.resnet18(num_classes=10).to(device)
+    net = torchvision.models.resnet18(num_classes=1000).to(device)
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -65,9 +65,8 @@ def main():
     )
     train_loader.update_model(net)
     train_loader.update_dataset(
-        torchvision.datasets.ImageNet, 
-        data_path, 
-        ssplit='train', 
+        torchvision.datasets.ImageFolder,
+        data_path + '/training_data', 
         transform=train_transform
     )
     train_loader.update_dataloader(
@@ -80,9 +79,8 @@ def main():
     )
     
     test_loader = torch.utils.data.DataLoader(
-        torchvision.datasets.ImageNet(
-            data_path, 
-            split='val',
+        torchvision.datasets.ImageFolder(
+            data_path + '/validation_data', 
             transform=test_transform
         ), 
         batch_size=128, 
