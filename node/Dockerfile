@@ -16,6 +16,8 @@ COPY . /app
 
 WORKDIR /app
 RUN chmod +x build.sh
-RUN ./build.sh
+#RUN ./build.sh
 
-CMD ["./main"]
+#CMD ["./main"]
+
+CMD ./build.sh && ./node

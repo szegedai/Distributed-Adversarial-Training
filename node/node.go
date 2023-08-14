@@ -65,9 +65,7 @@ func (self *Node) Run() {
   self.cleanBatchBuffer = make(chan []byte, self.BufferSize)
   self.advBatchBuffer = make(chan []byte, self.BufferSize)
 
-  fmt.Println("GO2")
   C.initPython()
-  fmt.Println("GO3")
   defer C.finalizePython()
 
   self.session = http.Client{}
