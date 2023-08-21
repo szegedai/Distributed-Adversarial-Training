@@ -20,6 +20,20 @@ import (
   "syscall"
 )
 
+func printBytes(data []byte) {
+  fmt.Print("Go: ")
+  for i := 0; i < 10; i++ {
+    fmt.Printf("%02X ", data[i])
+  }
+  fmt.Print("... ")
+
+  start := len(data) - 10
+  for i := start; i < len(data); i++ {
+    fmt.Printf("%02X ", data[i])
+  }
+  fmt.Println()
+}
+
 func GB2CB(b []byte) C.bytes_t {
   data := (*C.int8_t)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&b)).Data))
   size := (C.size_t)(len(b))
@@ -78,12 +92,16 @@ func (self *Node) Run() {
   go func() {
     self.attackID, self.modelID = self.getIDs()
   }()
-  go self.updateAttack()
-  go self.updateModel()
+  go func() {
+    self.updateAttack()
+    self.updateModel()
+  }()
   for i := (uint16)(0); i < self.BufferSize; i++ {
     go self.getCleanBatch()
   }
+  fmt.Println("G1")
   self.mainWG.Wait()
+  fmt.Println("G2")
   
   for self.running {
     self.mainWG.Add(3)
@@ -172,6 +190,7 @@ func (self *Node) updateAttack() {
   fmt.Println("Go: updateAttack - start")
   defer self.mainWG.Done()
   data := self.getData("/attack")
+  printBytes(data)
   C.updateAttack(GB2CB(data))
   fmt.Println("Go: updateAttack - end")
 }
@@ -180,6 +199,7 @@ func (self *Node) updateModel() {
   fmt.Println("Go: updateModel - start")
   defer self.mainWG.Done()
   data := self.getData("/model")
+  printBytes(data)
   C.updateModel(GB2CB(data))
   fmt.Println("Go: updateModel - end")
 }

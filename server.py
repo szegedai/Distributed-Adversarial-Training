@@ -6,6 +6,23 @@ from aiohttp import web
 from heapq import heappush, heappop
 
 
+def print_bytes(data):
+    print("Py:", end=" ")
+    for i in range(10):
+        if i < len(data):
+            print(f"{data[i]:02X}", end=" ")
+        else:
+            break
+    print("...", end=" ")
+
+    for i in range(len(data) - 10, len(data)):
+        if i >= 0:
+            print(f"{data[i]:02X}", end=" ")
+        else:
+            break
+    print()
+
+
 class Server:
     # TODO:
     # 2) Handle the case when a request comes in before the dataset and dataloader objects are initialised!

@@ -4,6 +4,19 @@
 #define AQUIRE_GIL PyGILState_STATE gState = PyGILState_Ensure();
 #define RELEASE_GIL PyGILState_Release(gState); if (PyGILState_Check()) PyEval_SaveThread();
 
+void print_bytes(bytes_t cBytes) {
+  printf("C: ");
+  for (size_t i = 0; i < 10; i++) {
+    printf("%02X ", (unsigned char)cBytes.data[i]);
+  }
+  printf("... ");
+
+  for (size_t i = cBytes.size - 10; i < cBytes.size; i++) {
+    printf("%02X ", (unsigned char)cBytes.data[i]);
+  }
+  printf("\n");
+}
+
 PyObject* pyModule;
 
 PyObject* pySetDevice;
@@ -98,6 +111,9 @@ int updateAttack(bytes_t inputBytes) {
 
   //PyObject* pyBytes = PyBytes_FromStringAndSize(inputBytes.data, inputBytes.size);
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  if (pyBytes == NULL)
+    printf("ERROR while creating memory view!\n");
+  print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateAttack, pyArgs);
 
@@ -117,6 +133,9 @@ int updateModel(bytes_t inputBytes) {
 
   //PyObject* pyBytes = PyBytes_FromStringAndSize(inputBytes.data, inputBytes.size);
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  if (pyBytes == NULL)
+    printf("ERROR while creating memory view!\n");
+  print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateModel, pyArgs);
 
