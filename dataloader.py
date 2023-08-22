@@ -1,5 +1,7 @@
 import requests
 import dill
+import torch
+import io
 import time
 
 class DistributedAdversarialDataLoader:
@@ -30,18 +32,22 @@ class DistributedAdversarialDataLoader:
         )
 
     def update_attack(self, attack_class, *attack_args, **attack_kwargs):
+        attack_bytes = io.BytesIO()
+        torch.save((attack_class, attack_args, attack_kwargs), attack_bytes, dill)
         self._send_data(
             f'http://{self._host}/attack', 
-            dill.dumps((attack_class, attack_args, attack_kwargs)),
+            attack_bytes.getvalue(),
             self._session
         )
 
     def update_model(self, model, new_architecture=False):
+        model_bytes = io.BytesIO()
+        torch.save(model, model_bytes, dill)
         self._send_data(
             f'http://{self._host}/model', 
             b''.join((
                 new_architecture.to_bytes(1, 'big'),
-                dill.dumps(model)
+                model_bytes.getvalue()
             )),
             self._session
         )

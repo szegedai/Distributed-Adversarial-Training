@@ -99,9 +99,7 @@ func (self *Node) Run() {
   for i := (uint16)(0); i < self.BufferSize; i++ {
     go self.getCleanBatch()
   }
-  fmt.Println("G1")
   self.mainWG.Wait()
-  fmt.Println("G2")
   
   for self.running {
     self.mainWG.Add(3)
@@ -168,12 +166,14 @@ func (self *Node) postData(resource string, data []byte) {
 
 func (self *Node) getCleanBatch() {
   fmt.Println("Go: getCleanBatch - start")
+  defer self.mainWG.Done()
   self.cleanBatchBuffer <- self.getData("/clean_batch")
   fmt.Println("Go: getCleanBatch - end")
 }
 
 func (self *Node) postAdvBatch() {
   fmt.Println("Go: postAdvBatch - start")
+  defer self.mainWG.Done()
   self.postData("/adv_batch", <-self.advBatchBuffer)
   fmt.Println("Go: postAdvBatch - end")
 }

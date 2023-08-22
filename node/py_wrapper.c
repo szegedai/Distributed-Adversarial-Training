@@ -89,7 +89,7 @@ bytes_t perturb(bytes_t inputBytes) {
   printf("C: perturb - start\n");
   AQUIRE_GIL
 
-  PyObject* pyBytes = PyBytes_FromStringAndSize(inputBytes.data, inputBytes.size);
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyPerturb, pyArgs);
 
@@ -109,10 +109,7 @@ int updateAttack(bytes_t inputBytes) {
   CHECK_GIL
   AQUIRE_GIL
 
-  //PyObject* pyBytes = PyBytes_FromStringAndSize(inputBytes.data, inputBytes.size);
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  if (pyBytes == NULL)
-    printf("ERROR while creating memory view!\n");
   print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateAttack, pyArgs);
@@ -131,10 +128,7 @@ int updateModel(bytes_t inputBytes) {
   CHECK_GIL
   AQUIRE_GIL
 
-  //PyObject* pyBytes = PyBytes_FromStringAndSize(inputBytes.data, inputBytes.size);
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  if (pyBytes == NULL)
-    printf("ERROR while creating memory view!\n");
   print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateModel, pyArgs);
