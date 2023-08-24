@@ -16,6 +16,11 @@ class DistributedAdversarialDataLoader:
         self._num_batches = None
         self._next_batch_idx = 0
         self._session = requests.Session()
+        # When the node receives any data and deserializes it, dill will automatically set it to __main__.XY 
+        # but if the Python script of the node is ran by another program or imported as a module, __name__ will 
+        # not be __main__ and the sent data will not be able to access imported librarys.
+        # The following line solves this issue.
+        dill.settings['recurse'] = True
 
     def update_dataset(self, dataset_class, *dataset_args, **dataset_kwargs):
         self._send_data(

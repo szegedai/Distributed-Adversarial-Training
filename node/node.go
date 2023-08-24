@@ -118,10 +118,12 @@ func (self *Node) Run() {
       latestAttackID, latestModelID := self.getIDs()
       if latestAttackID != self.attackID {
         self.mainWG.Add(1)
+        self.attackID = latestAttackID
         go self.updateAttack()
       }
       if latestModelID != self.modelID {
 	self.mainWG.Add(1)
+        self.modelID = latestModelID
         go self.updateModel()
       }
       fmt.Println("Go: _func_1 - end")
@@ -150,8 +152,6 @@ func (self *Node) getData(resource string) []byte {
     panic(fmt.Sprintln("Error reading response body:", err))
   }
 
-  //fmt.Println("GET", resource)
-
   return body
 }
 
@@ -161,7 +161,6 @@ func (self *Node) postData(resource string, data []byte) {
     panic(fmt.Sprintln("Error during POST request:", err))
   }
   defer resp.Body.Close()
-  //fmt.Println("POST", resource)
 }
 
 func (self *Node) getCleanBatch() {

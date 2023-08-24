@@ -5,6 +5,7 @@ import json
 import re
 import time
 import requests
+import io
 
 class Node:
     # Consider adding support for HTTPS too!
@@ -38,7 +39,8 @@ class Node:
                 latest_attack_id, latest_mode_id = int.from_bytes(response_bytes[:8], 'big'), int.from_bytes(response_bytes[8:], 'big')
                 if latest_attack_id != self._attack_id:
                     response_bytes = self._get_data(f'http://{self.host}/attack', session) 
-                    attack_class, attack_args, attack_kwargs = dill.loads(response_bytes)
+                    #attack_class, attack_args, attack_kwargs = dill.loads(response_bytes)
+                    attack_class, attack_args, attack_kwargs = torch.load(io.BytesIO(response_bytes), self.device, dill)
                     for arg in attack_args:
                         if isinstance(arg, torch.nn.Module):
                             arg.to(self.device)
@@ -46,7 +48,8 @@ class Node:
                     self._attack_id = latest_attack_id
                 if latest_mode_id != self._model_id:
                     response_bytes = self._get_data(f'http://{self.host}/model', session)
-                    self._attack.model = dill.loads(response_bytes)
+                    #self._attack.model = dill.loads(response_bytes)
+                    self._attack.model = torch.load(io.BytesIO(response_bytes), self.device, dill)
                     self._attack.model.to(self.device)
                     self._model_id = latest_mode_id
 

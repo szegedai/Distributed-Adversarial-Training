@@ -62,7 +62,7 @@ int finalizePython() {
   Py_DECREF(pyUpdateAttack);
   Py_DECREF(pyUpdateModel);
   Py_DECREF(pyModule);
-  Py_Finalize();
+  Py_Finalize();  // This causes a segfault. Further debugging is needed!
   printf("C: finalizePython - end\n");
   return 0;
 }
@@ -81,7 +81,6 @@ int setDevice(char* newDevice) {
 
   RELEASE_GIL
   printf("C: setDevice - end\n");
-  CHECK_GIL
   return 0;
 }
 
@@ -106,7 +105,6 @@ bytes_t perturb(bytes_t inputBytes) {
 
 int updateAttack(bytes_t inputBytes) {
   printf("C: updateAttack - start\n");
-  CHECK_GIL
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
@@ -125,7 +123,6 @@ int updateAttack(bytes_t inputBytes) {
 
 int updateModel(bytes_t inputBytes) {
   printf("C: updateModel - start\n");
-  CHECK_GIL
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);

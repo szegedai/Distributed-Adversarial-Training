@@ -58,7 +58,7 @@ def main():
         torch.nn.CrossEntropyLoss(),
         8 / 255,
         2 / 255,
-        1
+        10
     )
     train_loader.update_model(net)
     train_loader.update_dataset(

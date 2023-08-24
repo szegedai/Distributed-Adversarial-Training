@@ -3,6 +3,7 @@ import dill
 import io
 import traceback
 
+
 def print_bytes(data):
     print('Py:', end=' ')
     for i in range(10):
@@ -25,8 +26,6 @@ def set_device(new_device):
         global device
         device = torch.device(new_device)
     except:
-        #print(type(e))
-        #print(e)
         traceback.print_exc()
     print("Py: set_device - end")
 
@@ -43,8 +42,6 @@ def perturb(encoded_data):
             dill.dumps((attack.perturb(x, y).cpu(), y.cpu()))
         ))
     except:
-        #print(type(e))
-        #print(e)
         traceback.print_exc()
     print("Py: perturb - end")
     return data
@@ -61,8 +58,6 @@ def update_attack(encoded_data):
                 arg.to(device)
         attack = attack_class(*attack_args, **attack_kwargs)
     except:
-        #print(type(e))
-        #print(e)
         traceback.print_exc()
     print("Py: update_attack - end")
 
@@ -76,8 +71,6 @@ def update_model(encoded_data):
         attack.model = new_model
         attack.model.to(device)
     except:
-        #print(type(e))
-        #print(e)
         traceback.print_exc()
     print("Py: update_mode - end")
 
