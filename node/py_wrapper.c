@@ -84,15 +84,13 @@ int setDevice(char* newDevice) {
   return 0;
 }
 
-bytes_t perturb(bytes_t inputBytes) {
+int perturb(bytes_t inputBytes) {
   printf("C: perturb - start\n");
   AQUIRE_GIL
 
-  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_WRITE);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyPerturb, pyArgs);
-
-  bytes_t outputBytes = {(int8_t*)PyBytes_AsString(pyResult), (size_t)PyBytes_Size(pyResult)};
 
   Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);
@@ -100,7 +98,7 @@ bytes_t perturb(bytes_t inputBytes) {
 
   RELEASE_GIL
   printf("C: perturb - end\n");
-  return outputBytes;
+  return 0;
 }
 
 int updateAttack(bytes_t inputBytes) {

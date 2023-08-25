@@ -2,6 +2,7 @@ import torch
 import dill
 import argparse
 import asyncio
+import io
 from aiohttp import web
 from heapq import heappush, heappop
 
@@ -65,7 +66,9 @@ class Server:
             batch = next(self._dataloader_iter)
         id = self._latest_unused_batch_id
         self._latest_unused_batch_id += 1
-        self._batch_store[id] = dill.dumps(batch)
+        batch_bytes = io.BytesIO()
+        torch.save(batch, batch_bytes, dill)
+        self._batch_store[id] = batch_bytes.getvalue()
         heappush(self._free_q, id)
 
     async def _run_request_handler(self):

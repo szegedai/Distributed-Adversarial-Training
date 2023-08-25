@@ -33,18 +33,18 @@ def perturb(encoded_data):
     try:
         print("Py: perturb - start")
         global attack, device
-        batch_id, (x, y) = int.from_bytes(encoded_data[:8], 'big'), dill.loads(encoded_data[8:])
-        x = x.to(device)
-        y = y.to(device)
+        batch_id_bytes = encoded_data[:8]
+        x, y = torch.load(io.BytesIO(encoded_data[8:]), device, dill)
 
-        data = b''.join((
-            batch_id.to_bytes(8, 'big'),
-            dill.dumps((attack.perturb(x, y).cpu(), y.cpu()))
-        ))
+        new_x = attack.perturb(x, y)
+
+        new_data = io.BytesIO()
+        torch.save((new_x.cpu(), y.cpu()), new_data, dill)
+
+        encoded_data[8:] = new_data.getvalue()
     except:
         traceback.print_exc()
     print("Py: perturb - end")
-    return data
 
 def update_attack(encoded_data):
     try:

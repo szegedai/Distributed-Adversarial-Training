@@ -106,7 +106,9 @@ func (self *Node) Run() {
     go func() {
       fmt.Println("Go: _func_0 - start")
       defer self.mainWG.Done()
-      self.advBatchBuffer <- CB2GB(C.perturb(GB2CB(<-self.cleanBatchBuffer)))
+      batchBytes := <-self.cleanBatchBuffer
+      C.perturb(GB2CB(batchBytes))
+      self.advBatchBuffer <- batchBytes
       go self.postAdvBatch()
       go self.getCleanBatch()
       fmt.Println("Go: _func_0 - end")

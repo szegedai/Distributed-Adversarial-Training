@@ -72,7 +72,7 @@ class DistributedAdversarialDataLoader:
         if self._num_batches == self._next_batch_idx:
             raise StopIteration()
 
-        batch = dill.loads(self._get_data(f'http://{self._host}/adv_batch', self._session))
+        batch = torch.load(io.BytesIO(self._get_data(f'http://{self._host}/adv_batch', self._session)), 'cpu', dill)
         self._next_batch_idx += 1
 
         if self._autoupdate_model:
