@@ -3,7 +3,6 @@ import torchvision
 import torch.nn as nn
 import torch.optim as optim
 
-#from Dataloader.dataloader import DistributedAdversarialDataLoader
 from dataloader import DistributedAdversarialDataLoader
 
 class LinfPGDAttack:
@@ -40,7 +39,7 @@ class LinfPGDAttack:
 
 def main():
     data_path = '../cifar_data/cifar10'
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cpu')
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
@@ -141,4 +140,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

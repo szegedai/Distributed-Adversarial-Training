@@ -31,11 +31,10 @@ def set_device(new_device):
 
 def perturb(encoded_data):
     try:
-        print("Py: perturb - start")
         global attack, device
         batch_id_bytes = encoded_data[:8]
         x, y = torch.load(io.BytesIO(encoded_data[8:]), device, dill)
-
+        
         new_x = attack.perturb(x, y)
 
         new_data = io.BytesIO()
@@ -44,7 +43,6 @@ def perturb(encoded_data):
         encoded_data[8:] = new_data.getvalue()
     except:
         traceback.print_exc()
-    print("Py: perturb - end")
 
 def update_attack(encoded_data):
     try:

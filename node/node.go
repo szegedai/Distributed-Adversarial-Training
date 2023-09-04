@@ -80,7 +80,7 @@ func (self *Node) Run() {
   self.advBatchBuffer = make(chan []byte, self.BufferSize)
 
   C.initPython()
-  defer C.finalizePython()
+  //defer C.finalizePython()
 
   self.session = http.Client{}
 
@@ -88,46 +88,65 @@ func (self *Node) Run() {
 
   self.setDevice()
 
-  self.mainWG.Add(3 + (int)(self.BufferSize))
+  self.mainWG.Add(2)
   go func() {
+    defer self.mainWG.Done()
     self.attackID, self.modelID = self.getIDs()
   }()
+
+  self.mainWG.Add(3)
   go func() {
+    defer self.mainWG.Done()
     self.updateAttack()
     self.updateModel()
   }()
+
   for i := (uint16)(0); i < self.BufferSize; i++ {
+    self.mainWG.Add(1)
     go self.getCleanBatch()
   }
+  
   self.mainWG.Wait()
   
   for self.running {
-    self.mainWG.Add(3)
+    self.mainWG.Add(1)
     go func() {
-      fmt.Println("Go: _func_0 - start")
       defer self.mainWG.Done()
+      fmt.Println("Go: _func_0 - start")
+
       batchBytes := <-self.cleanBatchBuffer
       C.perturb(GB2CB(batchBytes))
       self.advBatchBuffer <- batchBytes
+
+      self.mainWG.Add(2)
       go self.postAdvBatch()
       go self.getCleanBatch()
+
       fmt.Println("Go: _func_0 - end")
     }()
+
     self.mainWG.Add(1)
     go func() {
-      fmt.Println("Go: _func_1 - start")
       defer self.mainWG.Done()
+      fmt.Println("Go: _func_1 - start")
+
+      self.mainWG.Add(1)
       latestAttackID, latestModelID := self.getIDs()
+
       if latestAttackID != self.attackID {
-        self.mainWG.Add(1)
         self.attackID = latestAttackID
+
+        self.mainWG.Add(1)
         go self.updateAttack()
       }
+      
       if latestModelID != self.modelID {
-	self.mainWG.Add(1)
         self.modelID = latestModelID
+
+        self.mainWG.Add(1)
         go self.updateModel()
       }
+
       fmt.Println("Go: _func_1 - end")
     }()
     self.mainWG.Wait()
@@ -168,6 +187,7 @@ func (self *Node) postData(resource string, data []byte) {
 func (self *Node) getCleanBatch() {
   fmt.Println("Go: getCleanBatch - start")
   defer self.mainWG.Done()
+
   self.cleanBatchBuffer <- self.getData("/clean_batch")
   fmt.Println("Go: getCleanBatch - end")
 }
@@ -175,13 +195,17 @@ func (self *Node) getCleanBatch() {
 func (self *Node) postAdvBatch() {
   fmt.Println("Go: postAdvBatch - start")
   defer self.mainWG.Done()
+
   self.postData("/adv_batch", <-self.advBatchBuffer)
+
   fmt.Println("Go: postAdvBatch - end")
 }
 
 func (self *Node) getIDs() (uint64, uint64) {
   fmt.Println("Go: getIDs - start")
+
   defer self.mainWG.Done()
+
   data := self.getData("/ids")
   fmt.Println("Go: getIDs - end")
   return binary.BigEndian.Uint64(data[:8]), binary.BigEndian.Uint64(data[8:])
@@ -189,7 +213,9 @@ func (self *Node) getIDs() (uint64, uint64) {
 
 func (self *Node) updateAttack() {
   fmt.Println("Go: updateAttack - start")
+
   defer self.mainWG.Done()
+
   data := self.getData("/attack")
   printBytes(data)
   C.updateAttack(GB2CB(data))
@@ -198,7 +224,9 @@ func (self *Node) updateAttack() {
 
 func (self *Node) updateModel() {
   fmt.Println("Go: updateModel - start")
+
   defer self.mainWG.Done()
+
   data := self.getData("/model")
   printBytes(data)
   C.updateModel(GB2CB(data))
