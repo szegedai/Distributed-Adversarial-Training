@@ -1,6 +1,9 @@
 #!/bin/bash
 
-gcc -I/usr/include/python3.10 -fPIC -shared -o libpy_wrapper.so py_wrapper.c -L/usr/lib/python3.10/config-3.10-x86_64-linux-gnu -lpython3.10
+PY_VERSION=$(basename /usr/include/python3.*)
+gcc -I/usr/include/$PY_VERSION -fPIC -shared -o libpy_wrapper.so py_wrapper.c -L$(realpath /usr/lib/$PY_VERSION/config-*) -l$PY_VERSION
 
-go build -ldflags="-extldflags '-Wl,-rpath,.' -L ." node.go
+export CGO_CFLAGS="-I/usr/include/$PY_VERSION"
+export CGO_LDFLAGS="-L. -lpy_wrapper"
+go build node.go
 

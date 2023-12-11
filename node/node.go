@@ -1,8 +1,6 @@
 package main
 
 /*
-#cgo CFLAGS: -I/usr/include/python3.10
-#cgo LDFLAGS: -L. -lpy_wrapper
 #include "py_wrapper.h"
 */
 import "C"
