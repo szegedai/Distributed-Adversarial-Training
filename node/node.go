@@ -16,6 +16,7 @@ import (
   "os"
   "os/signal"
   "syscall"
+  "flag"
 )
 
 func printBytes(data []byte) {
@@ -233,6 +234,10 @@ func (self *Node) updateModel() {
 
 
 func main() {
-  n := Node{Host: "http://127.0.0.1:8080", Device: "cpu", BufferSize: (uint16)(5)}
+  host := flag.String("host", "http://127.0.0.1:8080", "The exact host where the server is running")
+  device := flag.String("device", "cpu", "The device the is used by PyTorch for the perturbation process")
+  bufferSize := flag.Uint("buffer size", 5, "The amount of batches preloaded by the node")
+
+  n := Node{Host: *host, Device: *device, BufferSize: (uint16)(*bufferSize)}
   n.Run()
 }

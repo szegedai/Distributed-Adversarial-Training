@@ -27,6 +27,7 @@ def set_device(new_device):
         device = torch.device(new_device)
     except:
         traceback.print_exc()
+        exit(-1)
     print("Py: set_device - end")
 
 def perturb(encoded_data):
@@ -43,6 +44,7 @@ def perturb(encoded_data):
         encoded_data[8:] = new_data.getvalue()
     except:
         traceback.print_exc()
+        exit(-1)
 
 def update_attack(encoded_data):
     try:
@@ -57,6 +59,7 @@ def update_attack(encoded_data):
         attack = attack_class(*attack_args, **attack_kwargs)
     except:
         traceback.print_exc()
+        exit(-1)
     print("Py: update_attack - end")
 
 def update_model(encoded_data):
@@ -70,5 +73,6 @@ def update_model(encoded_data):
         attack.model.to(device)
     except:
         traceback.print_exc()
+        exit(-1)
     print("Py: update_mode - end")
 
