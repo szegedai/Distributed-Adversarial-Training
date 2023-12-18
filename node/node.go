@@ -1,7 +1,7 @@
 package main
 
 /*
-#include "py_wrapper.h"
+#include "pyinterface.h"
 */
 import "C"
 import (
@@ -234,9 +234,11 @@ func (self *Node) updateModel() {
 
 
 func main() {
-  host := flag.String("host", "http://127.0.0.1:8080", "The exact host where the server is running")
-  device := flag.String("device", "cpu", "The device the is used by PyTorch for the perturbation process")
-  bufferSize := flag.Uint("buffer size", 5, "The amount of batches preloaded by the node")
+  host := flag.String("H", "http://127.0.0.1:8080", "The exact host where the server is running")
+  device := flag.String("D", "cpu", "The device the is used by PyTorch for the perturbation process")
+  bufferSize := flag.Uint("B", 5, "The amount of batches preloaded by the node")
+
+  flag.Parse()
 
   n := Node{Host: *host, Device: *device, BufferSize: (uint16)(*bufferSize)}
   n.Run()

@@ -39,8 +39,8 @@ class LinfPGDAttack:
 
 def main():
     data_path = '../cifar_data/cifar10'
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
-    #device = torch.device('cpu')
+    #device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
 

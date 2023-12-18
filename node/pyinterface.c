@@ -32,7 +32,7 @@ int initPython() {
   PyObject* path = PyObject_GetAttrString(sys, "path");
   PyList_Append(path, PyUnicode_DecodeFSDefault("."));
 
-  PyObject* ModuleString = PyUnicode_DecodeFSDefault((char*)"perturber");
+  PyObject* ModuleString = PyUnicode_DecodeFSDefault((char*)"perturb");
  
   if (!ModuleString) 
     PyErr_Print();

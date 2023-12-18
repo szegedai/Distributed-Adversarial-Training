@@ -5,5 +5,5 @@ gcc -I/usr/include/$PY_VERSION -fPIC -shared -o libpyinterface.so pyinterface.c 
 
 export CGO_CFLAGS="-I/usr/include/$PY_VERSION"
 export CGO_LDFLAGS="-L. -lpyinterface"
-go build -ldflags="-extldflags '-Wl,-rpath,.' -L ." node.go
+go build -ldflags="-extldflags '-Wl,-rpath,.' -L ." server.go
 
