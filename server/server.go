@@ -5,11 +5,34 @@ package main
 */
 import "C"
 import (
-  "fmt"
-  "net/http"
-  . "github.com/Jcowwell/go-algorithm-club/Heap"
-  . "github.com/Jcowwell/go-algorithm-club/Utils"
+	"fmt"
+	"log"
+	"net/http"
+	"reflect"
+	"unsafe"
+  "os"
+  "os/signal"
+  "syscall"
+  "context"
+  "time"
+	. "github.com/Jcowwell/go-algorithm-club/Heap"
+	. "github.com/Jcowwell/go-algorithm-club/Utils"
 )
+
+func GB2CB(b []byte) C.bytes_t {
+  data := (*C.int8_t)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&b)).Data))
+  size := (C.size_t)(len(b))
+  return C.bytes_t{data, size}
+}
+
+func CB2GB(b C.bytes_t) []byte {
+  sliceHeader := reflect.SliceHeader{
+    Data: uintptr(unsafe.Pointer(b.data)),
+    Len: (int)(b.size),
+    Cap: (int)(b.size),
+  }
+  return *(*[]byte)(unsafe.Pointer(&sliceHeader))
+}
 
 func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.Request), postHandler func(http.ResponseWriter, *http.Request)) {
   http.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +98,12 @@ func InitServer(address string) *Server {
 }
 
 func (self *Server) Run() {
+  stop := make(chan os.Signal)
+  signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+  C.initPython()
+  //defer C.finalizePython()  //Debuging required!
+
   dispathRequest("/attack", self.onGetAttack, self.onPostAttack)
   dispathRequest("/model", self.onGetModel, self.onPostModel)
   dispathRequest("/adv_batch", self.onGetAdvBatch, self.onPostAdvBatch)
@@ -84,10 +113,30 @@ func (self *Server) Run() {
   dispathRequest("/dataset", nil, self.onPostDataset)
   dispathRequest("/dataloader", nil, self.onPostDataloader)
 
-  err := http.ListenAndServe(self.address, nil)
-  if err != nil {
-    panic(err)
+  httpServer := &http.Server{Addr: self.address}
+
+  go func() {
+    if err := httpServer.ListenAndServe(); err != nil {
+      log.Fatal(err)
+    }
+  }()
+
+  <-stop
+  
+  ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+  defer cancel()
+
+  if err := httpServer.Shutdown(ctx); err != nil {
+      log.Println("HTTP shutdown error:", err)
   }
+  if err := httpServer.Close(); err != nil {
+      log.Println("HTTP server close error:", err)
+  }
+  log.Println("Server stopped gracefully.")
+}
+
+func (self *Server) loadCleanBatch() []byte {
+  return CB2GB(C.getCleanBatch())
 }
 
 func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
