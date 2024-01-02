@@ -5,16 +5,17 @@ package main
 */
 import "C"
 import (
-	"fmt"
+	"context"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"reflect"
+	"syscall"
+	"time"
 	"unsafe"
-  "os"
-  "os/signal"
-  "syscall"
-  "context"
-  "time"
+  "sync"
 	. "github.com/Jcowwell/go-algorithm-club/Heap"
 	. "github.com/Jcowwell/go-algorithm-club/Utils"
 )
@@ -39,12 +40,15 @@ func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.R
     switch r.Method {
     case http.MethodGet:
       if getHandler != nil {
+        w.Header().Set("Content-Type", "application/octet-stream")
+        w.WriteHeader(http.StatusOK)
         getHandler(w, r)
       } else {
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
       }
     case http.MethodPost:
       if postHandler != nil {
+        w.WriteHeader(http.StatusOK)
         postHandler(w, r)
       } else {
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -63,37 +67,44 @@ type Server struct {
 
   modelData []byte
   modelID uint64
+  modelMutex sync.RWMutex
   attackData []byte
   attackID uint64
+  attackMutex sync.RWMutex
 
   freeQ Heap[uint64]
-  workingQ map[uint64]uint64
+  freeQMutex sync.RWMutex
+  workQ map[uint64]uint64
+  workQMutex sync.RWMutex
   doneQ Heap[uint64]
+  doneQMutex sync.RWMutex
 
   batchStore map[uint64][]byte
   oldBatchStore map[uint64][]byte
+  batchStoreMutex sync.RWMutex
 
-  latestUnusedBatchID uint64
+  nextBatchID uint64
+  nextBatchIDMutex sync.Mutex
 }
 
 func InitServer(address string) *Server {
   return &Server{
-    address, 
-    0, 0, 
-    nil, 0, 
-    nil, 0, 
-    Heap[uint64]{
+    address: address, 
+    queueSoftLimit: 0, maxPatiente: 0, 
+    modelData: nil, modelID: 0, 
+    attackData: nil, attackID: 0, 
+    freeQ: Heap[uint64]{
       []uint64{}, 
       LessThan[uint64],
     }, 
-    make(map[uint64]uint64), 
-    Heap[uint64]{
+    workQ: make(map[uint64]uint64), 
+    doneQ: Heap[uint64]{
       []uint64{},
       LessThan[uint64],
     },
-    make(map[uint64][]byte),
-    make(map[uint64][]byte),
-    1,
+    batchStore: make(map[uint64][]byte),
+    oldBatchStore: make(map[uint64][]byte),
+    nextBatchID: 0,
   }
 }
 
@@ -139,20 +150,53 @@ func (self *Server) loadCleanBatch() []byte {
   return CB2GB(C.getCleanBatch())
 }
 
-func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
-
+func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) { 
+  self.attackMutex.RLock()
+  w.Write(self.attackData)
+  self.attackMutex.RUnlock()
+  
+  w.Flush()
 }
 
 func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal("Could not read request body:", err)
+  }
 
+  self.attackMutex.Lock()
+  self.attackData = data
+  self.attackID += 1
+  self.attackMutex.Unlock()
+
+  //TODO: Handle the case when the attack is updated during the training!
+  // Resend batches that are currently being worked on or do not bother?
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
+  self.modelMutex.RLock()
+  w.Write(self.modelData)
+  self.modelMutex.RUnlock()
 
+  w.Flush()
 }
 
 func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal("Could not read request body:", err)
+  }
 
+  self.modelMutex.Lock()
+  self.modelData = data[1:]
+  self.modelID += 1
+  self.modelMutex.Unlock()
+
+  if data[0] == 1 {
+    //TODO: Handle the case when not just the parameters of the model were changed,
+    // but the entire architecture changed.
+    // Resend batches that are currently being worked on?
+  }
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
