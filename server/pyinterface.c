@@ -19,8 +19,7 @@ void print_bytes(bytes_t cBytes) {
 
 PyObject* pyModule;
 
-PyObject* pyUpdateDataset;
-PyObject* pyUpdateDataloader;
+PyObject* pyUpdateData;
 PyObject* pyGetNumBatches;
 PyObject* pyGetCleanBatch;
 
@@ -47,8 +46,7 @@ int initPython() {
   else
     PyErr_Print();
 
-  pyUpdateDataset = PyObject_GetAttrString(pyModule, "update_dataset");
-  pyUpdateDataloader = PyObject_GetAttrString(pyModule, "update_dataloader");
+  pyUpdateData = PyObject_GetAttrString(pyModule, "update_data");
   pyGetNumBatches = PyObject_GetAttrString(pyModule, "get_num_batches");
   pyGetCleanBatch = PyObject_GetAttrString(pyModule, "get_clean_batch");
   printf("C: initPython - end\n");
@@ -57,32 +55,16 @@ int initPython() {
 
 int finalizePython() {
   printf("C: finalizePython - start\n");
-  Py_DECREF(pySetDevice);
-  Py_DECREF(pyPerturb);
-  Py_DECREF(pyUpdateAttack);
-  Py_DECREF(pyUpdateModel);
+  Py_DECREF(pyUpdateData);
+  Py_DECREF(pyGetNumBatches);
+  Py_DECREF(pyGetCleanBatch);
   Py_DECREF(pyModule);
   Py_Finalize();  // This causes a segfault. Further debugging is needed!
   printf("C: finalizePython - end\n");
   return 0;
 }
 
-int updateDataset(bytes_t inputBytes) {
-  AQUIRE_GIL
-
-  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
-  PyObject* pyResult = PyObject_CallObject(pyUpdateDataset, pyArgs);
-
-  Py_DECREF(pyBytes);
-  Py_DECREF(pyArgs);
-  Py_DECREF(pyResult);
-
-  RELEASE_GIL
-  return 0;
-}
-
-int updateDataloader(bytes_t inputBytes) {
+int updateData(bytes_t inputBytes) {
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);

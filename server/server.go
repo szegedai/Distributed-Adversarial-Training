@@ -16,8 +16,7 @@ import (
 	"time"
 	"unsafe"
   "sync"
-	. "github.com/Jcowwell/go-algorithm-club/Heap"
-	. "github.com/Jcowwell/go-algorithm-club/Utils"
+  "encoding/binary"
 )
 
 func GB2CB(b []byte) C.bytes_t {
@@ -80,18 +79,39 @@ type Server struct {
   freeQ chan *Batch
   workQ sync.Map
   doneQ chan *Batch
+
+  setupWG sync.WaitGroup
+  finishDataSetup func()
+  finishParametersSetup func()
+  finishAttackSetup func()
+  finishModelSetup func()
 }
 
-func InitServer(address string) *Server {
-  return &Server{
-    address: address, 
-    queueSoftLimit: 0, maxPatiente: 0, 
-    modelData: nil, modelID: 0, 
-    attackData: nil, attackID: 0, 
-    freeQ: nil, 
-    workQ: sync.Map{}, 
-    doneQ: nil,
-  }
+func (self *Server) Reset() {
+  self.queueSoftLimit = 0
+  self.maxPatiente = 0
+  self.modelData = nil 
+  self.modelID = 0
+  self.attackData = nil
+  self.attackID = 0
+  self.freeQ = nil
+  self.workQ = sync.Map{}
+  self.doneQ = nil
+  self.setupWG = sync.WaitGroup{}
+  self.finishDataSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
+  self.finishParametersSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
+  self.finishAttackSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
+  self.finishModelSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
+
+  self.setupWG.Add(4)
 }
 
 func (self *Server) Run() {
@@ -107,8 +127,12 @@ func (self *Server) Run() {
   dispathRequest("/clean_batch", self.onGetCleanBatch, nil)
   dispathRequest("/ids", self.onGetIDs, nil)
   dispathRequest("/num_batches", self.onGetNumBatches, nil)
-  dispathRequest("/dataset", nil, self.onPostDataset)
-  dispathRequest("/dataloader", nil, self.onPostDataloader)
+  dispathRequest("/data", nil, self.onPostData)
+  dispathRequest("/parameters", nil, self.onPostParameters)
+  http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+    log.Println("Reseting server!")
+    self.Reset()
+  })
 
   httpServer := &http.Server{Addr: self.address}
 
@@ -132,14 +156,18 @@ func (self *Server) Run() {
   log.Println("Server stopped gracefully.")
 }
 
-func (self *Server) loadCleanBatch() *Batch {
-  return &Batch{
+func (self *Server) loadCleanBatch() {
+  batch := &Batch{
     clean: CB2GB(C.getCleanBatch()), 
     adv: nil,
   }
+
+  self.freeQ <- batch
 }
 
-func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) { 
+func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
+
   self.attackMutex.RLock()
   w.Write(self.attackData)
   self.attackMutex.RUnlock()
@@ -160,9 +188,13 @@ func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
 
   //TODO: Handle the case when the attack is updated during the training!
   // Resend batches that are currently being worked on or do not bother?
+
+  self.finishAttackSetup()
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
+
   self.modelMutex.RLock()
   w.Write(self.modelData)
   self.modelMutex.RUnlock()
@@ -189,6 +221,7 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
 
   // Move every expired batch back to the freeQ, to redo them.
   self.workQ.Range(func(batch any, startModelID any) bool {
+    self.modelMutex.RLock()
     if self.modelID - startModelID.(uint64) > self.maxPatiente {
       // After a very long time, the subtruction can cause a slight bug when the
       // startModelID is somewhere at the end of the uint64 range and the modelID
@@ -196,13 +229,16 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
       self.workQ.Delete(batch)
       self.freeQ <- batch.(*Batch)
     }
+    self.modelMutex.RUnlock()
     return true
   })
+
+  self.finishModelSetup()
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
-  //TODO: Check if doneQ is nil or not. If it is nil, the user tried to iterate without
-  // setting up the server properly.
+  self.setupWG.Wait()
+
   w.Write((<-self.doneQ).adv)
   w.Flush()
 }
@@ -228,26 +264,80 @@ func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
 
+  batch := <-self.freeQ
+
+  go self.loadCleanBatch()
+  
+  self.modelMutex.RLock()
+  self.workQ.Store(batch, self.modelID)
+  self.modelMutex.RUnlock()
+
+  batchIDBytes := make([]byte, 8)
+  binary.BigEndian.PutUint64(batchIDBytes, uint64(uintptr(unsafe.Pointer(batch))))
+
+  w.Write(batchIDBytes)
+  w.Write(batch.clean)
+  w.Flush()
 }
 
 func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
+  
+  attackIDBytes := make([]byte, 8)
+  modelIDBytes := make([]byte, 8)
+  binary.BigEndian.PutUint64(attackIDBytes, self.attackID)
+  binary.BigEndian.PutUint64(modelIDBytes, self.modelID)
 
+  w.Write(attackIDBytes)
+  w.Write(modelIDBytes)
+  w.Flush()
 }
 
 func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
 
+  numBatchesBytes := make([]byte, 8)
+  binary.BigEndian.PutUint64(numBatchesBytes, uint64(C.getNumBatches()))
+
+  w.Write(numBatchesBytes)
+  w.Flush()
 }
 
-func (self *Server) onPostDataset(w http.ResponseWriter, r *http.Request) {
+func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal("Could not read request body:", err)
+  }
 
+  C.updateData(GB2CB(data))
+
+  var i uint64
+  for i = 0; i < self.queueSoftLimit; i++ {
+    self.loadCleanBatch()
+  }
+
+  self.finishDataSetup()
 }
 
-func (self *Server) onPostDataloader(w http.ResponseWriter, r *http.Request) {
+func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal("Could not read request body:", err)
+  }
 
+  self.maxPatiente = binary.BigEndian.Uint64(data[0:8])
+  self.queueSoftLimit = binary.BigEndian.Uint64(data[8:16])
+
+  self.freeQ = make(chan *Batch, self.queueSoftLimit)
+  self.doneQ = make(chan *Batch, self.queueSoftLimit)
+
+  self.finishParametersSetup()
 }
 
 func main() {
-  s := InitServer(":8080")
+  s := Server{address: ":8080"}
+  s.Reset()
   s.Run()
 }

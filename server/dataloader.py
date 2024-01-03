@@ -13,21 +13,15 @@ def try_exc(f):
     return g
 
 @try_exc
-def update_dataset(data_bytes):
-    global dataloader, dataloader_iter, dataset
+def update_data(data_bytes):
+    global dataloader, dataloader_iter
 
-    dataloader = None
-    dataloader_iter = None
-
-    dataset_class, args, kwargs = dill.loads(data_bytes)
-    dataset = dataset_class(*args, **kwargs)
-
-@try_exc
-def update_dataloader(data_bytes):
-    global dataloader, dataloader_iter, dataset
-
-    args, kwargs = dill.loads(data_bytes)
-    dataloader = torch.utils.data.DataLoader(dataset, *args, **kwargs)
+    ds_class, ds_args, ds_kwargs, dl_args, dl_kwargs = dill.loads(data_bytes)
+    dataloader = torch.utils.data.DataLoader(
+        ds_class(*ds_args, **ds_kwargs), 
+        *dl_args, 
+        **dl_kwargs
+    )
     dataloader_iter = iter(dataloader)
 
 @try_exc
