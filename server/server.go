@@ -59,6 +59,11 @@ func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.R
   })
 }
 
+type Batch struct {
+  clean []byte
+  adv []byte
+}
+
 type Server struct {
   address string
 
@@ -72,19 +77,9 @@ type Server struct {
   attackID uint64
   attackMutex sync.RWMutex
 
-  freeQ Heap[uint64]
-  freeQMutex sync.RWMutex
-  workQ map[uint64]uint64
-  workQMutex sync.RWMutex
-  doneQ Heap[uint64]
-  doneQMutex sync.RWMutex
-
-  batchStore map[uint64][]byte
-  oldBatchStore map[uint64][]byte
-  batchStoreMutex sync.RWMutex
-
-  nextBatchID uint64
-  nextBatchIDMutex sync.Mutex
+  freeQ chan *Batch
+  workQ sync.Map
+  doneQ chan *Batch
 }
 
 func InitServer(address string) *Server {
@@ -93,18 +88,9 @@ func InitServer(address string) *Server {
     queueSoftLimit: 0, maxPatiente: 0, 
     modelData: nil, modelID: 0, 
     attackData: nil, attackID: 0, 
-    freeQ: Heap[uint64]{
-      []uint64{}, 
-      LessThan[uint64],
-    }, 
-    workQ: make(map[uint64]uint64), 
-    doneQ: Heap[uint64]{
-      []uint64{},
-      LessThan[uint64],
-    },
-    batchStore: make(map[uint64][]byte),
-    oldBatchStore: make(map[uint64][]byte),
-    nextBatchID: 0,
+    freeQ: nil, 
+    workQ: sync.Map{}, 
+    doneQ: nil,
   }
 }
 
@@ -146,8 +132,11 @@ func (self *Server) Run() {
   log.Println("Server stopped gracefully.")
 }
 
-func (self *Server) loadCleanBatch() []byte {
-  return CB2GB(C.getCleanBatch())
+func (self *Server) loadCleanBatch() *Batch {
+  return &Batch{
+    clean: CB2GB(C.getCleanBatch()), 
+    adv: nil,
+  }
 }
 
 func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) { 
@@ -197,14 +186,45 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
     // but the entire architecture changed.
     // Resend batches that are currently being worked on?
   }
+
+  // Move every expired batch back to the freeQ, to redo them.
+  self.workQ.Range(func(batch any, startModelID any) bool {
+    if self.modelID - startModelID.(uint64) > self.maxPatiente {
+      // After a very long time, the subtruction can cause a slight bug when the
+      // startModelID is somewhere at the end of the uint64 range and the modelID
+      // fliped already to the beginning of the calue range.
+      self.workQ.Delete(batch)
+      self.freeQ <- batch.(*Batch)
+    }
+    return true
+  })
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
-
+  //TODO: Check if doneQ is nil or not. If it is nil, the user tried to iterate without
+  // setting up the server properly.
+  w.Write((<-self.doneQ).adv)
+  w.Flush()
 }
 
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal("Could not read request body:", err)
+  }
 
+  // Read the first 8 bytes of the data as the memory address where the
+  // batch is stored. This is basically a batch ID.
+  batch := (*Batch)(unsafe.Pointer(&data[0]))
+
+  // If the batch was already moved back to the freeQ, just drop the batch.
+  if _, ok := self.workQ.LoadAndDelete(batch); !ok { 
+    return
+  }
+  
+  batch.clean = nil
+  batch.adv = data[8:]
+  self.doneQ <- batch
 }
 
 func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
