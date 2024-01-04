@@ -17,6 +17,7 @@ import (
 	"unsafe"
   "sync"
   "encoding/binary"
+  "flag"
 )
 
 func GB2CB(b []byte) C.bytes_t {
@@ -337,7 +338,11 @@ func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-  s := Server{address: ":8080"}
+  address := flag.String("A", ":8080", "Address and port for the server to listen on")
+
+  flag.Parse()
+
+  s := Server{address: *address}
   s.Reset()
   s.Run()
 }
