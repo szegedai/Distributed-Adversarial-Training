@@ -172,8 +172,6 @@ func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
   self.attackMutex.RLock()
   w.Write(self.attackData)
   self.attackMutex.RUnlock()
-  
-  w.Flush()
 }
 
 func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
@@ -199,8 +197,6 @@ func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
   self.modelMutex.RLock()
   w.Write(self.modelData)
   self.modelMutex.RUnlock()
-
-  w.Flush()
 }
 
 func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +237,6 @@ func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
   self.setupWG.Wait()
 
   w.Write((<-self.doneQ).adv)
-  w.Flush()
 }
 
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +275,6 @@ func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
 
   w.Write(batchIDBytes)
   w.Write(batch.clean)
-  w.Flush()
 }
 
 func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +287,6 @@ func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
 
   w.Write(attackIDBytes)
   w.Write(modelIDBytes)
-  w.Flush()
 }
 
 func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +296,6 @@ func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
   binary.BigEndian.PutUint64(numBatchesBytes, uint64(C.getNumBatches()))
 
   w.Write(numBatchesBytes)
-  w.Flush()
 }
 
 func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {

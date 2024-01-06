@@ -69,7 +69,7 @@ int updateData(bytes_t inputBytes) {
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
-  PyObject* pyResult = PyObject_CallObject(pyUpdateDataloader, pyArgs);
+  PyObject* pyResult = PyObject_CallObject(pyUpdateData, pyArgs);
 
   Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);
