@@ -39,7 +39,7 @@ def set_device(new_device):
 @try_exc
 def perturb(encoded_data):
     global attack, device
-    #batch_id_bytes = encoded_data[:8]
+
     x, y = torch.load(io.BytesIO(encoded_data[8:]), device, dill)
     x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
     new_x = attack.perturb(x, y)
@@ -47,7 +47,12 @@ def perturb(encoded_data):
     new_data = io.BytesIO()
     torch.save((new_x, y), new_data, dill)
 
-    encoded_data[8:] = new_data.getvalue()
+    #encoded_data[8:] = new_data.getvalue
+
+    return b''.join([
+        encoded_data[:8].tobytes(),
+        new_data.getvalue()
+    ])
 
 @try_exc
 def update_attack(encoded_data):
@@ -62,17 +67,15 @@ def update_attack(encoded_data):
     attack = attack_class(*attack_args, **attack_kwargs)
     print("Py: update_attack - end")
 
+@try_exc
 def update_model(encoded_data):
-    try:
-        print("Py: update_model - start")
-        global attack, device
-        print_bytes(encoded_data.tobytes())
-        new_model = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
-        encoded_data.release()
-        attack.model = new_model
-        attack.model.to(device)
-    except:
-        traceback.print_exc()
-        exit(-1)
+    print("Py: update_model - start")
+    global attack, device
+    print_bytes(encoded_data.tobytes())
+    new_model = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    print(new_model)
+    encoded_data.release()
+    attack.model = new_model
+    attack.model.to(device)
     print("Py: update_mode - end")
 

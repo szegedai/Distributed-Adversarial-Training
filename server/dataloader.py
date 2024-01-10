@@ -13,6 +13,23 @@ def try_exc(f):
     return g
 
 @try_exc
+def print_bytes(data):
+    print('Py:', end=' ')
+    for i in range(10):
+        if i < len(data):
+            print(f'{data[i]:02X}', end=' ')
+        else:
+            break
+    print('...', end=' ')
+    
+    for i in range(len(data) - 10, len(data)):
+        if i >= 0:
+            print(f'{data[i]:02X}', end=' ')
+        else:
+            break
+    print()
+
+@try_exc
 def update_data(data_bytes):
     global dataloader, dataloader_iter
 
@@ -23,6 +40,7 @@ def update_data(data_bytes):
         **dl_kwargs
     )
     dataloader_iter = iter(dataloader)
+    print(len(dataloader))
 
 @try_exc
 def get_num_batches():
@@ -42,5 +60,6 @@ def get_clean_batch():
 
     batch_bytes = io.BytesIO()
     torch.save(batch, batch_bytes, dill)
+
     return batch_bytes.getvalue()
 

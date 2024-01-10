@@ -4,6 +4,9 @@
 #define AQUIRE_GIL PyGILState_STATE gState = PyGILState_Ensure();
 #define RELEASE_GIL PyGILState_Release(gState); if (PyGILState_Check()) PyEval_SaveThread();
 
+int counter = 0;
+int8_t* check = 0; 
+
 void print_bytes(bytes_t cBytes) {
   printf("C: ");
   for (size_t i = 0; i < 10; i++) {
@@ -50,6 +53,9 @@ int initPython() {
   pyGetNumBatches = PyObject_GetAttrString(pyModule, "get_num_batches");
   pyGetCleanBatch = PyObject_GetAttrString(pyModule, "get_clean_batch");
   printf("C: initPython - end\n");
+
+  if (PyGILState_Check()) PyEval_SaveThread();
+
   return 0;
 }
 
@@ -76,11 +82,13 @@ int updateData(bytes_t inputBytes) {
   Py_DECREF(pyResult);
 
   RELEASE_GIL
+
   return 0;
 }
 
 size_t getNumBatches() {
   AQUIRE_GIL
+
 
   PyObject* pyArgs = PyTuple_New(0);
   PyObject* pyResult = PyObject_CallObject(pyGetNumBatches, pyArgs);
@@ -91,6 +99,7 @@ size_t getNumBatches() {
   Py_DECREF(pyResult);
 
   RELEASE_GIL
+
   return result;
 }
 
@@ -100,16 +109,30 @@ bytes_t getCleanBatch() {
   PyObject* pyArgs = PyTuple_New(0);
   PyObject* pyResult = PyObject_CallObject(pyGetCleanBatch, pyArgs);
 
-  char* pyInternalBytes = PyBytes_AsString(pyResult);
+  int8_t* pyInternalBytes = PyBytes_AsString(pyResult);
+
   size_t numBytes = PyBytes_Size(pyResult);
 
   bytes_t outputBytes = (bytes_t){(int8_t*)malloc(numBytes), numBytes};
   // Copy the data to not refer to the internal Python memory.
-  memcpy(pyInternalBytes, outputBytes.data, outputBytes.size);
+  memcpy(outputBytes.data, pyInternalBytes, outputBytes.size);
 
   Py_DECREF(pyArgs);
   Py_DECREF(pyResult);
 
+/*
+  if(counter == 0) {
+    check = outputBytes.data;
+  }
+
+  if(counter % ) {
+    free(check);
+    free(check);
+  }
+
+  counter++;
+*/
   RELEASE_GIL
+
   return outputBytes;
 }

@@ -18,6 +18,7 @@ import (
   "sync"
   "encoding/binary"
   "flag"
+  "fmt"
 )
 
 func GB2CB(b []byte) C.bytes_t {
@@ -27,12 +28,15 @@ func GB2CB(b []byte) C.bytes_t {
 }
 
 func CB2GB(b C.bytes_t) []byte {
-  sliceHeader := reflect.SliceHeader{
+  /*sliceHeader := reflect.SliceHeader{
     Data: uintptr(unsafe.Pointer(b.data)),
     Len: (int)(b.size),
     Cap: (int)(b.size),
   }
-  return *(*[]byte)(unsafe.Pointer(&sliceHeader))
+  return *(*[]byte)(unsafe.Pointer(&sliceHeader))*/
+  bytes := C.GoBytes(unsafe.Pointer(b.data), (C.int)(b.size))
+  C.free(unsafe.Pointer(b.data))
+  return bytes
 }
 
 func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.Request), postHandler func(http.ResponseWriter, *http.Request)) {
@@ -59,12 +63,20 @@ func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.R
   })
 }
 
+type BatchMeta struct {
+  Batch *Batch
+  TimeStamp uint64
+}
+
 type Batch struct {
-  clean []byte
-  adv []byte
+  ID uint64
+  Clean []byte
+  Adv []byte
 }
 
 type Server struct {
+  nextBatchID uint64
+  nextBatchIDMutex sync.Mutex
   address string
 
   queueSoftLimit uint64
@@ -89,6 +101,7 @@ type Server struct {
 }
 
 func (self *Server) Reset() {
+  self.nextBatchID = 0
   self.queueSoftLimit = 0
   self.maxPatiente = 0
   self.modelData = nil 
@@ -116,6 +129,7 @@ func (self *Server) Reset() {
 }
 
 func (self *Server) Run() {
+
   stop := make(chan os.Signal)
   signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -157,11 +171,31 @@ func (self *Server) Run() {
   log.Println("Server stopped gracefully.")
 }
 
-func (self *Server) loadCleanBatch() {
-  batch := &Batch{
-    clean: CB2GB(C.getCleanBatch()), 
-    adv: nil,
+func printBytes(data []byte) {
+  fmt.Print("Go: ")
+  for i := 0; i < 10; i++ {
+    fmt.Printf("%02X ", data[i])
   }
+  fmt.Print("... ")
+
+  start := len(data) - 10
+  for i := start; i < len(data); i++ {
+    fmt.Printf("%02X ", data[i])
+  }
+  fmt.Println()
+}
+
+func (self *Server) loadCleanBatch() {
+  self.nextBatchIDMutex.Lock()
+
+  batch := &Batch{
+    ID: self.nextBatchID,
+    Clean: CB2GB(C.getCleanBatch()), 
+    Adv: nil,
+  }
+
+  self.nextBatchID += 1
+  self.nextBatchIDMutex.Unlock()
 
   self.freeQ <- batch
 }
@@ -189,6 +223,7 @@ func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   // Resend batches that are currently being worked on or do not bother?
 
   self.finishAttackSetup()
+  log.Println("GO: ATTACK RECEIVED")
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
@@ -217,26 +252,30 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   }
 
   // Move every expired batch back to the freeQ, to redo them.
-  self.workQ.Range(func(batch any, startModelID any) bool {
+  self.workQ.Range(func(batchID any, batchMeta any) bool {
     self.modelMutex.RLock()
-    if self.modelID - startModelID.(uint64) > self.maxPatiente {
+    if self.modelID - batchMeta.(BatchMeta).TimeStamp > self.maxPatiente {
       // After a very long time, the subtruction can cause a slight bug when the
       // startModelID is somewhere at the end of the uint64 range and the modelID
       // fliped already to the beginning of the calue range.
-      self.workQ.Delete(batch)
-      self.freeQ <- batch.(*Batch)
+      self.workQ.Delete(batchID)
+      self.freeQ <- batchMeta.(BatchMeta).Batch
     }
     self.modelMutex.RUnlock()
     return true
   })
 
   self.finishModelSetup()
+  log.Println("GO: MODEL RECEIVED")
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
+  log.Println("Get request adv_batch 1")
   self.setupWG.Wait()
+  log.Println("Get request adv_batch 2")
 
-  w.Write((<-self.doneQ).adv)
+  w.Write((<-self.doneQ).Adv)
+  log.Println("Get request adv_batch 3")
 }
 
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
@@ -245,17 +284,17 @@ func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
     log.Fatal("Could not read request body:", err)
   }
 
-  // Read the first 8 bytes of the data as the memory address where the
-  // batch is stored. This is basically a batch ID.
-  batch := (*Batch)(unsafe.Pointer(&data[0]))
+  batchID := binary.BigEndian.Uint64(data[0:8])
 
   // If the batch was already moved back to the freeQ, just drop the batch.
-  if _, ok := self.workQ.LoadAndDelete(batch); !ok { 
+  batchMeta, loaded := self.workQ.LoadAndDelete(batchID)
+  if !loaded { 
     return
   }
+  batch := batchMeta.(BatchMeta).Batch
   
-  batch.clean = nil
-  batch.adv = data[8:]
+  batch.Clean = nil
+  batch.Adv = data[8:]
   self.doneQ <- batch
 }
 
@@ -267,14 +306,14 @@ func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
   go self.loadCleanBatch()
   
   self.modelMutex.RLock()
-  self.workQ.Store(batch, self.modelID)
+  self.workQ.Store(batch.ID, BatchMeta{batch, self.modelID})
   self.modelMutex.RUnlock()
 
   batchIDBytes := make([]byte, 8)
-  binary.BigEndian.PutUint64(batchIDBytes, uint64(uintptr(unsafe.Pointer(batch))))
+  binary.BigEndian.PutUint64(batchIDBytes, batch.ID)
 
   w.Write(batchIDBytes)
-  w.Write(batch.clean)
+  w.Write(batch.Clean)
 }
 
 func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
@@ -300,10 +339,11 @@ func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
 
 func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
+
   if err != nil {
     log.Fatal("Could not read request body:", err)
   }
-
+  
   C.updateData(GB2CB(data))
 
   var i uint64
@@ -331,7 +371,6 @@ func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
 
 func main() {
   address := flag.String("A", ":8080", "Address and port for the server to listen on")
-
   flag.Parse()
 
   s := Server{address: *address}

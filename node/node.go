@@ -40,12 +40,15 @@ func GB2CB(b []byte) C.bytes_t {
 }
 
 func CB2GB(b C.bytes_t) []byte {
-  sliceHeader := reflect.SliceHeader{
+  /*sliceHeader := reflect.SliceHeader{
     Data: uintptr(unsafe.Pointer(b.data)),
     Len: (int)(b.size),
     Cap: (int)(b.size),
   }
-  return *(*[]byte)(unsafe.Pointer(&sliceHeader))
+  return *(*[]byte)(unsafe.Pointer(&sliceHeader))*/
+  bytes := C.GoBytes(unsafe.Pointer(b.data), (C.int)(b.size))
+  C.free(unsafe.Pointer(b.data))
+  return bytes
 }
 
 type Node struct {
@@ -114,7 +117,9 @@ func (self *Node) Run() {
       fmt.Println("Go: _func_0 - start")
 
       batchBytes := <-self.cleanBatchBuffer
-      C.perturb(GB2CB(batchBytes))
+      fmt.Println("--------", binary.BigEndian.Uint64(batchBytes[:8]))
+      batchBytes = CB2GB(C.perturb(GB2CB(batchBytes)))
+      fmt.Println("--------", binary.BigEndian.Uint64(batchBytes[:8]))
       self.advBatchBuffer <- batchBytes
 
       self.mainWG.Add(2)

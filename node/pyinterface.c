@@ -1,4 +1,4 @@
-#include "py_wrapper.h"
+#include "pyinterface.h"
 
 #define CHECK_GIL if (PyGILState_Check()) printf("GIL is currently held by this thread.\n"); else printf("GIL is not held by this thread.\n");
 #define AQUIRE_GIL PyGILState_STATE gState = PyGILState_Ensure();
@@ -52,6 +52,9 @@ int initPython() {
   pyUpdateAttack = PyObject_GetAttrString(pyModule, "update_attack");
   pyUpdateModel = PyObject_GetAttrString(pyModule, "update_model");
   printf("C: initPython - end\n");
+
+  if (PyGILState_Check()) PyEval_SaveThread();
+
   return 0;
 }
 
@@ -84,21 +87,27 @@ int setDevice(char* newDevice) {
   return 0;
 }
 
-int perturb(bytes_t inputBytes) {
-  printf("C: perturb - start\n");
+bytes_t perturb(bytes_t inputBytes) {
   AQUIRE_GIL
 
-  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_WRITE);
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyPerturb, pyArgs);
+
+  int8_t* pyInternalBytes = PyBytes_AsString(pyResult);
+  size_t numBytes = PyBytes_Size(pyResult);
+
+  bytes_t outputBytes = (bytes_t){(int8_t*)malloc(numBytes), numBytes};
+  // Copy the data to not refer to the internal Python memory.
+  memcpy(outputBytes.data, pyInternalBytes, outputBytes.size);
 
   Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);
   Py_DECREF(pyResult);
 
   RELEASE_GIL
-  printf("C: perturb - end\n");
-  return 0;
+
+  return outputBytes;
 }
 
 int updateAttack(bytes_t inputBytes) {

@@ -22,7 +22,7 @@ int finalizePython();
 
 int setDevice(char* newDevice);
 
-int perturb(bytes_t inputBytes);
+bytes_t perturb(bytes_t inputBytes);
 
 int updateAttack(bytes_t inputBytes);
 
