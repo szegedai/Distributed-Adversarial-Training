@@ -1,49 +1,43 @@
 import torch
 import torch.utils.data as data
+import torch.nn as nn
+import torch.optim as optim
 import time
 import requests
 import dill
 import io
 import torchvision
-import torch.nn as nn
-import torch.optim as optim
-
-from requests import get
 from multiprocessing import Queue, Event, Process
 
 class ContinuousHTTPWorkerDataLoader(data.DataLoader):
-    def __init__(self, 
-        host='127.0.0.1:8080',
-        autoupdate_model=True,
-        num_preprocessed_batches=10,
-        max_patiente=20,
-        num_workers=2,
-        worker_queue_limit=15,
-        pin_memory_device='cuda:0'
+    def __init__(
+        self, 
+        host='http://127.0.0.1:8080',
+        num_workers=4,
+        buffer_size=5,
+        pin_memory_device='cpu'
     ):
-        self._host = host
-        self._autoupdate_model = autoupdate_model
-        self._queue_soft_limit = num_preprocessed_batches
-        self._max_patiente = max_patiente
+        self.host = host
+        self.pin_memory_device = pin_memory_device
         self._model = None
-        self._num_batches = None
-        self._next_batch_idx = 0
+        self._num_batches = 0
+        self._num_processed_batches = 0
+        self._num_workers = num_workers
         self._session = requests.Session()
+        self._batch_queue = Queue(buffer_size)
+        self._worker_ready_events = []
 
         dill.settings['recurse'] = True
 
-        self.num_workers = num_workers
-        self.worker_queue_limit = worker_queue_limit
-        self.pin_memory_device = pin_memory_device
+        self._num_batches = int.from_bytes(self._get_data(f'{self.host}/num_batches', self._session), 'big', signed=False)
 
-        self.batch_queue = Queue()
-        self.ready_event = Event()
-
-        self.worker_processes = []
+        self._worker_processes = []
         for _ in range(self.num_workers):
-            worker_process = Process(target=self.worker_process)
+            ready_event = Event()
+            self._worker_ready_events.append(ready_event)
+            worker_process = Process(target=self._worker_process, args=(ready_event,))
             worker_process.start()
-            self.worker_processes.append(worker_process)
+            self._worker_processes.append(worker_process)
 
     @staticmethod
     def _get_data(url, session, max_retrys=-1):
@@ -73,33 +67,42 @@ class ContinuousHTTPWorkerDataLoader(data.DataLoader):
             retry_count += 1
         raise TimeoutError('Reached the maximum number of retrys while sending data.')
 
+    def __len__(self):
+        return self._num_batches
+
     def __iter__(self):
-        self.ready_event.wait()
+        # Wait for all worker processes to start.
+        for ready_event in self._worker_ready_events:
+            ready_event.wait()
+        
+        return self
 
-        while True:
-            try:
-                batch = self.batch_queue.get()
-                yield batch
+    def __next__(self):
+        if self._num_processed_batches >= self._num_batches:
+            raise StopIteration
 
-            except Exception as e:
-                print('Failed to get batch:', e)
+        batch = self._batch_queue.get(block=True, timeout=None)
+        self._num_processed_batches += 1
+        return batch
 
     def update_attack(self, attack_class, *attack_args, **attack_kwargs):
         attack_bytes = io.BytesIO()
         torch.save((attack_class, attack_args, attack_kwargs), attack_bytes, dill)
         self._send_data(
-            f'http://{self._host}/attack', 
+            f'{self._host}/attack', 
             attack_bytes.getvalue(),
             self._session
         )
     
     def update_model(self, model, new_architecture=False):
+        # TODO: Move network communication to a separate process!
+
         self._model = model
 
         model_bytes = io.BytesIO()
         torch.save(model, model_bytes, dill)
         self._send_data(
-            f'http://{self._host}/model', 
+            f'{self._host}/model', 
             b''.join((
                 new_architecture.to_bytes(1, 'big'),
                 model_bytes.getvalue()
@@ -110,67 +113,46 @@ class ContinuousHTTPWorkerDataLoader(data.DataLoader):
 
     def update_data(self, dataset_class, dataset_args, dataset_kwargs, dataloader_args, dataloader_kwargs):
         self._send_data(
-            f'http://{self._host}/data',
-            dill.dumps(
-                (
+            f'{self._host}/data',
+            dill.dumps((
                     dataset_class,
                     dataset_args,
                     dataset_kwargs, 
                     dataloader_args,
                     dataloader_kwargs
-                )
-            ),
+            )),
             self._session
         )
 
-    def set_parameters(self, max_patiente, queue_soft_limit):
+    def set_parameters(self, max_patiente, queue_limit):
         self._send_data(
-            f'http://{self._host}/parameters',
+            f'{self._host}/parameters',
             b''.join((
                 max_patiente.to_bytes(8, 'big'),
-                queue_soft_limit.to_bytes(8, 'big'),
+                queue_limit.to_bytes(8, 'big'),
             )), 
             self._session
         )
 
     def reset_server(self):
-        self._send_data(f'http://{self._host}/data', b'', self._session)
+        self._send_data(f'{self._host}/data', b'', self._session)
 
     def get_batch(self):
         batch = torch.load(
             io.BytesIO(
-                self._get_data(f'http://{self._host}/adv_batch', self._session)),
+                self._get_data(f'{self._host}/adv_batch', self._session)),
                 self.pin_memory_device,
                 dill
         )
-        self._next_batch_idx += 1
-
         return batch
 
 
-    def worker_process(self):
-        self.ready_event.set()
+    def _worker_process(self, ready_event):
+        # Signal that this worker was created and starting.
+        ready_event.set()
 
         while True:
-            if(self.worker_queue_limit - self.num_workers < self.batch_queue.qsize()):
-                time.sleep(0.001)
-            else:
-
-                try:
-                    data = self.get_batch()
-
-                    if self.pin_memory_device:
-                        image = data[0].to(self.pin_memory_device, non_blocking=True)
-                        label = data[1].to(self.pin_memory_device, non_blocking=True)
-                    else:
-                        image = data[0]
-                        label = data[1]
-
-                    self.batch_queue.put((image, label))
-
-                    time.sleep(0.01)
-                except Exception as e:
-                    print('Worker failed:', e)
+            self._batch_queue.put(self.get_batch(), block=True, timeout=None)
 
 
 class LinfPGDAttack:
@@ -205,11 +187,10 @@ class LinfPGDAttack:
             delta = (x + delta).clamp(*self.bounds) - x
         return x + delta
 
-train_loader = ContinuousHTTPWorkerDataLoader()
-
 data_path = '../cifar_data/cifar10'
-#device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cuda:0')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+train_loader = ContinuousHTTPWorkerDataLoader(pin_memory_device=device)
 
 net = torchvision.models.resnet18(num_classes=10).to(device)
 
@@ -230,7 +211,7 @@ train_loader.update_attack(
     10
 )
 
-train_loader.set_parameters(max_patiente=100000, queue_soft_limit=5)
+train_loader.set_parameters(max_patiente=100000, queue_limit=5)
 train_loader.update_data(
     torchvision.datasets.CIFAR10, 
     [
@@ -243,11 +224,11 @@ train_loader.update_data(
     },
     [],
     {
-        "batch_size": 128, 
-        "shuffle": True, 
-        "num_workers": 3, 
-        "multiprocessing_context": 'spawn', 
-        "persistent_workers": True
+        'batch_size': 128, 
+        'shuffle': True, 
+        'num_workers': 4, 
+        'multiprocessing_context': 'spawn', 
+        'persistent_workers': True
     }
 )
 
