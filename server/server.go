@@ -243,15 +243,9 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   }
 
   self.modelMutex.Lock()
-  self.modelData = data[1:]
+  self.modelData = data
   self.modelID += 1
   self.modelMutex.Unlock()
-
-  if data[0] == 1 {
-    //TODO: Handle the case when not just the parameters of the model were changed,
-    // but the entire architecture changed.
-    // Resend batches that are currently being worked on?
-  }
 
   // Move every expired batch back to the freeQ, to redo them.
   self.workQ.Range(func(batchID any, batchMeta any) bool {
