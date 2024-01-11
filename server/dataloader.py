@@ -40,7 +40,6 @@ def update_data(data_bytes):
         **dl_kwargs
     )
     dataloader_iter = iter(dataloader)
-    print(len(dataloader))
 
 @try_exc
 def get_num_batches():

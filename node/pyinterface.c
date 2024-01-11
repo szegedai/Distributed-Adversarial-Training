@@ -4,7 +4,7 @@
 #define AQUIRE_GIL PyGILState_STATE gState = PyGILState_Ensure();
 #define RELEASE_GIL PyGILState_Release(gState); if (PyGILState_Check()) PyEval_SaveThread();
 
-void print_bytes(bytes_t cBytes) {
+void printBytes(bytes_t cBytes) {
   printf("C: ");
   for (size_t i = 0; i < 10; i++) {
     printf("%02X ", (unsigned char)cBytes.data[i]);
@@ -25,8 +25,9 @@ PyObject* pyUpdateAttack;
 PyObject* pyUpdateModel;
 
 int initPython() {
-  printf("C: initPython - start\n");
   Py_Initialize();
+
+  AQUIRE_GIL
 
   PyObject* sys = PyImport_ImportModule("sys");
   PyObject* path = PyObject_GetAttrString(sys, "path");
@@ -51,27 +52,29 @@ int initPython() {
   pyPerturb = PyObject_GetAttrString(pyModule, "perturb");
   pyUpdateAttack = PyObject_GetAttrString(pyModule, "update_attack");
   pyUpdateModel = PyObject_GetAttrString(pyModule, "update_model");
-  printf("C: initPython - end\n");
 
-  if (PyGILState_Check()) PyEval_SaveThread();
+  RELEASE_GIL
 
   return 0;
 }
 
 int finalizePython() {
-  printf("C: finalizePython - start\n");
+  AQUIRE_GIL
+
   Py_DECREF(pySetDevice);
   Py_DECREF(pyPerturb);
   Py_DECREF(pyUpdateAttack);
   Py_DECREF(pyUpdateModel);
   Py_DECREF(pyModule);
+
+  RELEASE_GIL
+
   Py_Finalize();  // This causes a segfault. Further debugging is needed!
-  printf("C: finalizePython - end\n");
+
   return 0;
 }
 
 int setDevice(char* newDevice) {
-  printf("C: setDevice - start\n");
   AQUIRE_GIL
 
   PyObject* pyString = PyUnicode_FromString(newDevice);
@@ -83,7 +86,7 @@ int setDevice(char* newDevice) {
   Py_DECREF(pyResult);
 
   RELEASE_GIL
-  printf("C: setDevice - end\n");
+
   return 0;
 }
 
@@ -111,11 +114,9 @@ bytes_t perturb(bytes_t inputBytes) {
 }
 
 int updateAttack(bytes_t inputBytes) {
-  printf("C: updateAttack - start\n");
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateAttack, pyArgs);
 
@@ -124,16 +125,14 @@ int updateAttack(bytes_t inputBytes) {
   Py_DECREF(pyResult);
 
   RELEASE_GIL
-  printf("C: updateAttack - end\n");
+
   return 0;
 }
 
 int updateModel(bytes_t inputBytes) {
-  printf("C: updateModel - start\n");
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  print_bytes(inputBytes);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateModel, pyArgs);
 
@@ -142,6 +141,6 @@ int updateModel(bytes_t inputBytes) {
   Py_DECREF(pyResult);
 
   RELEASE_GIL
-  printf("C: updateModel - end\n");
+
   return 0;
 }

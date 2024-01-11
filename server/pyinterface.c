@@ -27,8 +27,9 @@ PyObject* pyGetNumBatches;
 PyObject* pyGetCleanBatch;
 
 int initPython() {
-  printf("C: initPython - start\n");
   Py_Initialize();
+
+  AQUIRE_GIL
 
   PyObject* sys = PyImport_ImportModule("sys");
   PyObject* path = PyObject_GetAttrString(sys, "path");
@@ -52,21 +53,24 @@ int initPython() {
   pyUpdateData = PyObject_GetAttrString(pyModule, "update_data");
   pyGetNumBatches = PyObject_GetAttrString(pyModule, "get_num_batches");
   pyGetCleanBatch = PyObject_GetAttrString(pyModule, "get_clean_batch");
-  printf("C: initPython - end\n");
 
-  if (PyGILState_Check()) PyEval_SaveThread();
+  RELEASE_GIL
 
   return 0;
 }
 
 int finalizePython() {
-  printf("C: finalizePython - start\n");
+  AQUIRE_GIL
+
   Py_DECREF(pyUpdateData);
   Py_DECREF(pyGetNumBatches);
   Py_DECREF(pyGetCleanBatch);
   Py_DECREF(pyModule);
-  Py_Finalize();  // This causes a segfault. Further debugging is needed!
-  printf("C: finalizePython - end\n");
+
+  RELEASE_GIL
+
+  Py_Finalize();
+  
   return 0;
 }
 
@@ -88,7 +92,6 @@ int updateData(bytes_t inputBytes) {
 
 size_t getNumBatches() {
   AQUIRE_GIL
-
 
   PyObject* pyArgs = PyTuple_New(0);
   PyObject* pyResult = PyObject_CallObject(pyGetNumBatches, pyArgs);
@@ -120,18 +123,6 @@ bytes_t getCleanBatch() {
   Py_DECREF(pyArgs);
   Py_DECREF(pyResult);
 
-/*
-  if(counter == 0) {
-    check = outputBytes.data;
-  }
-
-  if(counter % ) {
-    free(check);
-    free(check);
-  }
-
-  counter++;
-*/
   RELEASE_GIL
 
   return outputBytes;

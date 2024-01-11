@@ -74,12 +74,10 @@ type Batch struct {
   Adv []byte
 }
 
-type Server struct {
-  nextBatchID uint64
-  nextBatchIDMutex sync.Mutex
+type Server struct { 
   address string
 
-  queueSoftLimit uint64
+  queueLimit uint64
   maxPatiente uint64
 
   modelData []byte
@@ -88,6 +86,8 @@ type Server struct {
   attackData []byte
   attackID uint64
   attackMutex sync.RWMutex
+  nextBatchID uint64
+  nextBatchIDMutex sync.Mutex
 
   freeQ chan *Batch
   workQ sync.Map
@@ -101,13 +101,13 @@ type Server struct {
 }
 
 func (self *Server) Reset() {
-  self.nextBatchID = 0
-  self.queueSoftLimit = 0
+  self.queueLimit = 0
   self.maxPatiente = 0
   self.modelData = nil 
   self.modelID = 0
   self.attackData = nil
   self.attackID = 0
+  self.nextBatchID = 0
   self.freeQ = nil
   self.workQ = sync.Map{}
   self.doneQ = nil
@@ -129,12 +129,11 @@ func (self *Server) Reset() {
 }
 
 func (self *Server) Run() {
-
   stop := make(chan os.Signal)
   signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
   C.initPython()
-  //defer C.finalizePython()  //Debuging required!
+  defer C.finalizePython()
 
   dispathRequest("/attack", self.onGetAttack, self.onPostAttack)
   dispathRequest("/model", self.onGetModel, self.onPostModel)
@@ -156,6 +155,8 @@ func (self *Server) Run() {
       log.Fatal(err)
     }
   }()
+
+  log.Println("Server started with config: { Address:", self.address, "}")
 
   <-stop
   
@@ -223,7 +224,8 @@ func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   // Resend batches that are currently being worked on or do not bother?
 
   self.finishAttackSetup()
-  log.Println("GO: ATTACK RECEIVED")
+
+  log.Println("Attack updated")
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
@@ -260,22 +262,22 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
       // fliped already to the beginning of the calue range.
       self.workQ.Delete(batchID)
       self.freeQ <- batchMeta.(BatchMeta).Batch
+
+      log.Println("Batch", batchID, "has expired")
     }
     self.modelMutex.RUnlock()
     return true
   })
 
   self.finishModelSetup()
-  log.Println("GO: MODEL RECEIVED")
+
+  log.Println("Model updated")
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
-  log.Println("Get request adv_batch 1")
   self.setupWG.Wait()
-  log.Println("Get request adv_batch 2")
 
   w.Write((<-self.doneQ).Adv)
-  log.Println("Get request adv_batch 3")
 }
 
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +349,7 @@ func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
   C.updateData(GB2CB(data))
 
   var i uint64
-  for i = 0; i < self.queueSoftLimit; i++ {
+  for i = 0; i < self.queueLimit; i++ {
     self.loadCleanBatch()
   }
 
@@ -361,12 +363,14 @@ func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
   }
 
   self.maxPatiente = binary.BigEndian.Uint64(data[0:8])
-  self.queueSoftLimit = binary.BigEndian.Uint64(data[8:16])
+  self.queueLimit = binary.BigEndian.Uint64(data[8:16])
 
-  self.freeQ = make(chan *Batch, self.queueSoftLimit)
-  self.doneQ = make(chan *Batch, self.queueSoftLimit)
+  self.freeQ = make(chan *Batch, self.queueLimit)
+  self.doneQ = make(chan *Batch, self.queueLimit)
 
   self.finishParametersSetup()
+
+  log.Println("Parameters updated: { MaxPatiente:", self.maxPatiente, "QueueLimit:", self.queueLimit, "}")
 }
 
 func main() {

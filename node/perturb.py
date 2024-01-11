@@ -31,10 +31,8 @@ def print_bytes(data):
 
 @try_exc
 def set_device(new_device):
-    print("Py: set_device - start")
     global device
     device = torch.device(new_device)
-    print("Py: set_device - end")
 
 @try_exc
 def perturb(encoded_data):
@@ -47,8 +45,6 @@ def perturb(encoded_data):
     new_data = io.BytesIO()
     torch.save((new_x, y), new_data, dill)
 
-    #encoded_data[8:] = new_data.getvalue
-
     return b''.join([
         encoded_data[:8].tobytes(),
         new_data.getvalue()
@@ -56,26 +52,19 @@ def perturb(encoded_data):
 
 @try_exc
 def update_attack(encoded_data):
-    print("Py: update_attack - start")
     global attack, device
-    print_bytes(encoded_data.tobytes())
     attack_class, attack_args, attack_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
     encoded_data.release()
     for arg in attack_args:
         if isinstance(arg, torch.nn.Module):
             arg.to(device)
     attack = attack_class(*attack_args, **attack_kwargs)
-    print("Py: update_attack - end")
 
 @try_exc
 def update_model(encoded_data):
-    print("Py: update_model - start")
     global attack, device
-    print_bytes(encoded_data.tobytes())
     new_model = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
-    print(new_model)
     encoded_data.release()
     attack.model = new_model
     attack.model.to(device)
-    print("Py: update_mode - end")
 

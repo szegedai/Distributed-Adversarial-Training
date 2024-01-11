@@ -1,5 +1,5 @@
-#ifndef PY_WRAPPER_H
-#define PY_WRAPPER_H
+#ifndef PYINTERFACE_H
+#define PYINTERFACE_H
 
 #include <Python.h>
 #include <stdlib.h>
