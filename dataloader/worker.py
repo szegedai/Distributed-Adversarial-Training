@@ -35,37 +35,27 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         dill.settings['recurse'] = True 
 
-    @staticmethod
-    def _get_data(url, session, max_retrys=-1):
-        retry_count = 0
-        while retry_count != max_retrys:
-            try:
-                response = session.get(url, verify=False)
-                if response.status_code == 200:
-                    return response.content
-            except (TimeoutError, ConnectionError) as e:
-                raise Warning('The following error was raised during a GET request:\n' + str(e))
-            time.sleep(1)
-            retry_count += 1
-        raise TimeoutError('Reached the maximum number of retrys while requesting data.')
+    def _get_data(self, to):
+        response = self._session.get(f'{self.host}/{to}', verify=False)
+        if response.status_code == 200:
+            return response.content
+        else:
+            raise Exception('GET request failed with status code', response.status_code)
 
-    @staticmethod
-    def _send_data(url, data, session, max_retrys=-1):
-        retry_count = 0
-        while retry_count != max_retrys:
-            try:
-                response = session.post(url, data=data, verify=False)
-                if response.status_code == 200:
-                    return
-            except (TimeoutError, ConnectionError) as e:
-                raise Warning('The following error was raised during a POST request:\n' + str(e))
-            time.sleep(1)
-            retry_count += 1
-        raise TimeoutError('Reached the maximum number of retrys while sending data.')
+    def _send_data(self, to, data):
+        response = self._session.post(f'{self.host}/{to}', data=data, verify=False)
+        if response.status_code == 200:
+            return
+        else:
+            raise Exception('POST request failed with status code', response.status_code)
 
     def __len__(self):
         if self._num_batches < 0:
-            self._num_batches = int.from_bytes(self._get_data(f'{self.host}/num_batches', self._session), 'big', signed=False)
+            self._num_batches = int.from_bytes(
+                self._get_data('num_batches'), 
+                'big', 
+                signed=False
+            )
 
         return self._num_batches
 
@@ -117,19 +107,14 @@ class DistributedAdversarialDataLoader(data.DataLoader):
             p.join()
 
     def update_attack(self, attack_class, *attack_args, **attack_kwargs):
-        attack_bytes = io.BytesIO()
-        torch.save((attack_class, attack_args, attack_kwargs), attack_bytes, dill)
-        self._send_data(
-            f'{self.host}/attack', 
-            attack_bytes.getvalue(),
-            self._session
-        )
+        with io.BytesIO() as attack_bytes:
+            torch.save((attack_class, attack_args, attack_kwargs), attack_bytes, dill)
+            self._send_data('attack', attack_bytes.getvalue())
     
     def update_model(self, model):
         self._model = model
 
-        # Empty the model queue there is a congestion, and put the lates
-        # model into the queue.
+        # Empty the model queue if there is a congestion, and put the lates model in.
         try:
             self._model_queue.get_nowait()
         except queue.Empty:
@@ -137,37 +122,35 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def update_data(self, dataset_class, dataset_args, dataset_kwargs, dataloader_args, dataloader_kwargs):
         self._send_data(
-            f'{self.host}/data',
+            'data',
             dill.dumps((
                     dataset_class,
                     dataset_args,
                     dataset_kwargs, 
                     dataloader_args,
                     dataloader_kwargs
-            )),
-            self._session
+            ))
         )
 
     def set_parameters(self, max_patiente, queue_limit):
         self._send_data(
-            f'{self.host}/parameters',
+            'parameters',
             b''.join((
                 max_patiente.to_bytes(8, 'big'),
                 queue_limit.to_bytes(8, 'big'),
-            )), 
-            self._session
+            )) 
         )
 
     def reset_server(self):
-        self._send_data(f'{self.host}/data', b'', self._session)
+        self._send_data('reset', b'')
 
     def get_batch(self):
-        batch = torch.load(
-            io.BytesIO(
-                self._get_data(f'{self.host}/adv_batch', self._session)),
-                self.pin_memory_device,
-                dill
-        )
+        with io.BytesIO(self._get_data('adv_batch')) as batch_bytes:
+            batch = torch.load(
+                    batch_bytes,
+                    self.pin_memory_device,
+                    dill
+            )
         return batch
 
     def _batch_downloader(self):
@@ -178,13 +161,9 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         while self._running.value:
             model = self._model_queue.get(block=True, timeout=None)
 
-            model_bytes = io.BytesIO()
-            torch.save(model, model_bytes, dill)
-            self._send_data(
-                f'{self.host}/model', 
-                model_bytes.getvalue(),
-                self._session
-            )
+            with io.BytesIO() as model_bytes:
+                torch.save(model, model_bytes, dill)
+                self._send_data('model', model_bytes.getvalue())
 
 
 class LinfPGDAttack:
@@ -227,7 +206,6 @@ def main():
     train_loader = DistributedAdversarialDataLoader(pin_memory_device=device)
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
-    #net.share_memory()
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
