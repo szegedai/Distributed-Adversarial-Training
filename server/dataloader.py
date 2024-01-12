@@ -45,7 +45,7 @@ def update_data(data_bytes):
 def get_num_batches():
     global dataloader
 
-    return len(dataloader).to_bytes(8, 'big')
+    return len(dataloader)
 
 @try_exc
 def get_clean_batch():
