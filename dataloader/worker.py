@@ -9,6 +9,7 @@ import io
 import torchvision
 import torch.multiprocessing as mp
 import queue
+from copy import deepcopy
 
 class DistributedAdversarialDataLoader(data.DataLoader):
     def __init__(
@@ -76,6 +77,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def __next__(self):
         if self._num_processed_batches >= self._num_batches:
+            self._num_processed_batches = 0
             raise StopIteration
 
         batch = self._batch_queue.get(block=True, timeout=None)
@@ -104,7 +106,15 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def stop(self):
         self._running.value = False
-        self._num_batches = 0
+
+        # TODO: Make the cleanup proces better. Clear the queues first!
+
+        self._model_uploader_process.terminate()
+        self._model_uploader_process.join()
+                
+        for p in self._batch_downloader_processes:
+            p.terminate()
+            p.join()
 
     def update_attack(self, attack_class, *attack_args, **attack_kwargs):
         attack_bytes = io.BytesIO()
@@ -123,7 +133,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         try:
             self._model_queue.get_nowait()
         except queue.Empty:
-            self._model_queue.put_nowait(model)
+            self._model_queue.put_nowait(deepcopy(model).cpu())
 
     def update_data(self, dataset_class, dataset_args, dataset_kwargs, dataloader_args, dataloader_kwargs):
         self._send_data(
@@ -212,10 +222,12 @@ class LinfPGDAttack:
 def main():
     data_path = '../cifar_data/cifar10'
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cpu')
 
     train_loader = DistributedAdversarialDataLoader(pin_memory_device=device)
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
+    #net.share_memory()
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -247,7 +259,7 @@ def main():
         },
         [],
         {
-            'batch_size': 128, 
+            'batch_size': 256, 
             'shuffle': True, 
             'num_workers': 4, 
             'multiprocessing_context': 'spawn', 
@@ -262,7 +274,7 @@ def main():
     correct = 0
     total = 0
 
-    for epoch in range(10):
+    for epoch in range(2):
         running_loss = 0.0
 
         for i, data in enumerate(train_loader, 0):
@@ -291,6 +303,7 @@ def main():
                 correct = 0
                 total = 0
 
+    train_loader.stop()
     print("Training finished.")
 
 if __name__ == '__main__':

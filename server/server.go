@@ -129,6 +129,8 @@ func (self *Server) Reset() {
 }
 
 func (self *Server) Run() {
+  log.Println("Starting server with config: { Address:", self.address, "}")
+
   stop := make(chan os.Signal)
   signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -144,7 +146,7 @@ func (self *Server) Run() {
   dispathRequest("/data", nil, self.onPostData)
   dispathRequest("/parameters", nil, self.onPostParameters)
   http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
-    log.Println("Reseting server!")
+    log.Println("Reseting server")
     self.Reset()
   })
 
@@ -156,7 +158,7 @@ func (self *Server) Run() {
     }
   }()
 
-  log.Println("Server started with config: { Address:", self.address, "}")
+  log.Println("Ready and running")
 
   <-stop
   
@@ -164,10 +166,10 @@ func (self *Server) Run() {
   defer cancel()
 
   if err := httpServer.Shutdown(ctx); err != nil {
-      log.Println("HTTP shutdown error:", err)
+      log.Println(err)
   }
   if err := httpServer.Close(); err != nil {
-      log.Println("HTTP server close error:", err)
+      log.Println(err)
   }
   log.Println("Server stopped gracefully.")
 }
@@ -212,7 +214,7 @@ func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal("Could not read request body:", err)
+    log.Fatal(err)
   }
 
   self.attackMutex.Lock()
@@ -224,8 +226,6 @@ func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   // Resend batches that are currently being worked on or do not bother?
 
   self.finishAttackSetup()
-
-  log.Println("Attack updated")
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +239,7 @@ func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal("Could not read request body:", err)
+    log.Fatal(err)
   }
 
   self.modelMutex.Lock()
@@ -264,8 +264,6 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   })
 
   self.finishModelSetup()
-
-  log.Println("Model updated")
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
@@ -277,7 +275,7 @@ func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal("Could not read request body:", err)
+    log.Fatal(err)
   }
 
   batchID := binary.BigEndian.Uint64(data[0:8])
@@ -337,7 +335,7 @@ func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
 
   if err != nil {
-    log.Fatal("Could not read request body:", err)
+    log.Fatal(err)
   }
   
   C.updateData(GB2CB(data))
@@ -353,7 +351,7 @@ func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal("Could not read request body:", err)
+    log.Fatal(err)
   }
 
   self.maxPatiente = binary.BigEndian.Uint64(data[0:8])

@@ -93,6 +93,8 @@ func (self *Node) Run() {
 
   self.setDevice()
 
+  log.Println("Ready and running")
+
   self.mainWG.Add(2)
   go func() {
     defer self.mainWG.Done()
@@ -158,20 +160,18 @@ func (self *Node) setDevice() {
   cDevice := C.CString(self.Device)
   defer C.free(unsafe.Pointer(cDevice))
   C.setDevice(cDevice)
-
-  log.Println("Device set")
 }
 
 func (self *Node) getData(resource string) []byte {
   resp, err := self.session.Get(self.Host + resource)
   if err != nil {
-    log.Fatal("GET request failed:", err)
+    log.Fatal(err)
   }
   defer resp.Body.Close()
 
   body, err := ioutil.ReadAll(resp.Body)
   if err != nil {
-    log.Fatal("Can not read response body:", err)
+    log.Fatal(err)
   }
 
   return body
@@ -180,7 +180,7 @@ func (self *Node) getData(resource string) []byte {
 func (self *Node) postData(resource string, data []byte) {
   resp, err := self.session.Post(self.Host + resource, "application/octet-stream", bytes.NewBuffer(data))
   if err != nil {
-    log.Fatal("POST request failed:", err)
+    log.Fatal(err)
   }
   defer resp.Body.Close()
 }
@@ -189,16 +189,12 @@ func (self *Node) getCleanBatch() {
   defer self.mainWG.Done()
 
   self.cleanBatchBuffer <- self.getData("/clean_batch")
-
-  log.Println("Clean batch received")
 }
 
 func (self *Node) postAdvBatch() {
   defer self.mainWG.Done()
 
   self.postData("/adv_batch", <-self.advBatchBuffer)
-
-  log.Println("Adversarial batch sent")
 }
 
 func (self *Node) getIDs() (uint64, uint64) {
@@ -212,20 +208,14 @@ func (self *Node) updateAttack() {
   defer self.mainWG.Done()
 
   data := self.getData("/attack")
-  printBytes(data)
   C.updateAttack(GB2CB(data))
-
-  log.Println("Attack updated")
 }
 
 func (self *Node) updateModel() {
   defer self.mainWG.Done()
 
   data := self.getData("/model")
-  printBytes(data)
   C.updateModel(GB2CB(data))
-
-  log.Println("Model updated")
 }
 
 
