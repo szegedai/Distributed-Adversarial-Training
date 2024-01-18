@@ -15,16 +15,20 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def __init__(
         self, 
         host='http://127.0.0.1:8080',
+        merge_batches=1,
         num_workers=2,
         buffer_size=5,
         pin_memory_device='cpu'
     ):
+        assert type(merge_batches) is int
+
         self.host = host
         self.pin_memory_device = pin_memory_device
         self._mp_ctx = mp.get_context('spawn')
         self._model = None
         self._num_batches = -1
         self._num_processed_batches = 0
+        self._merge_batches = merge_batches
         self._num_workers = num_workers
         self._session = requests.Session()
         self._batch_downloader_processes = []
@@ -56,6 +60,8 @@ class DistributedAdversarialDataLoader(data.DataLoader):
                 'big', 
                 signed=False
             )
+            # Integer division that rounds up, instead of down.
+            self._num_batches = -(-self._num_batches // self._merge_batches)
 
         return self._num_batches
 
@@ -70,8 +76,14 @@ class DistributedAdversarialDataLoader(data.DataLoader):
             self._num_processed_batches = 0
             raise StopIteration
 
-        batch = self._batch_queue.get(block=True, timeout=None)
+        xes, ys = [], []
+        for _ in range(self._merge_batches):
+            x, y = self._batch_queue.get(block=True, timeout=None)
+            xes.append(x)
+            ys.append(y)
+        batch = (torch.cat(xes), torch.cat(ys))
         self._num_processed_batches += 1
+
         return batch
 
     def __getstate__(self):
@@ -203,7 +215,10 @@ def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cpu')
 
-    train_loader = DistributedAdversarialDataLoader(pin_memory_device=device)
+    train_loader = DistributedAdversarialDataLoader(
+        merge_batches=2,
+        pin_memory_device=device
+    )
 
     net = torchvision.models.resnet18(num_classes=10).to(device)
 
