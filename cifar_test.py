@@ -3,7 +3,6 @@ import torchvision
 import time
 from dataloader.worker import DistributedAdversarialDataLoader
 
-
 class LinfPGDAttack:
     def __init__(self, model, loss_fn, eps, step_size, num_steps, random_start=True, bounds=(0.0, 1.0)):
         self.model = model
@@ -36,9 +35,8 @@ class LinfPGDAttack:
             delta = (x + delta).clamp(*self.bounds) - x
         return x + delta
 
-
 def main():
-    data_path = './imagenet_data'
+    data_path = '../cifar_data/cifar10'
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cpu')
 
@@ -47,11 +45,11 @@ def main():
         pin_memory_device=device
     )
 
-    net = torchvision.models.resnet50(num_classes=1000).to(device)
+    net = torchvision.models.resnet18(num_classes=10).to(device)
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
-        torchvision.transforms.CenterCrop(224),
+        torchvision.transforms.RandomCrop(32, padding=4),
         torchvision.transforms.RandomHorizontalFlip()
     ])
 
@@ -68,16 +66,18 @@ def main():
 
     train_loader.set_parameters(max_patiente=100000, queue_limit=5)
     train_loader.update_data(
-        torchvision.datasets.ImageFolder, 
+        torchvision.datasets.CIFAR10, 
         [
-            data_path + "/training_data"
+            data_path
         ], 
         {
+            "train": True, 
             "transform": train_transform, 
+            "download": True
         },
         [],
         {
-            'batch_size': 8, 
+            'batch_size': 256, 
             'shuffle': True, 
             'num_workers': 4, 
             'multiprocessing_context': 'spawn', 
@@ -86,7 +86,7 @@ def main():
     )
 
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(net.parameters(), lr=0.05, momentum=0.9)
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
 
     for epoch in range(2):
         losses = []
