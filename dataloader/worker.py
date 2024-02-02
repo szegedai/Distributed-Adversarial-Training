@@ -25,7 +25,6 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self.host = host
         self.pin_memory_device = pin_memory_device
         self._mp_ctx = mp.get_context('spawn')
-        self._model = None
         self._num_batches = -1
         self._num_processed_batches = 0
         self._merge_batches = merge_batches
@@ -34,7 +33,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self._batch_downloader_processes = []
         self._batch_queue = self._mp_ctx.Queue(buffer_size)
         self._model_uploader_process = None
-        self._model_queue = self._mp_ctx.Queue(1)
+        self._model_queue = self._mp_ctx.Queue()
         self._running = self._mp_ctx.Value('b', False, lock=True)
 
         dill.settings['recurse'] = True 
@@ -124,13 +123,8 @@ class DistributedAdversarialDataLoader(data.DataLoader):
             self._send_data('attack', attack_bytes.getvalue())
     
     def update_model(self, model):
-        self._model = model
-
-        # Empty the model queue if there is a congestion, and put the lates model in.
-        try:
-            self._model_queue.get_nowait()
-        except queue.Empty:
-            self._model_queue.put_nowait(deepcopy(model).cpu())
+        #self._model_queue.put(deepcopy(model).cpu())
+        self._model_queue.put_nowait(model)
 
     def update_data(self, dataset_class, dataset_args, dataset_kwargs, dataloader_args, dataloader_kwargs):
         self._send_data(
@@ -171,7 +165,16 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def _model_uploader(self):
         while self._running.value:
+            # Wait until there is at least one new model in the queue.
             model = self._model_queue.get(block=True, timeout=None)
+            # If there are multiple models in thr queue, empty it and use the last one.
+            try:
+                while True:        
+                    model = self._model_queue.get_nowait()
+            except queue.Empty:
+                pass
+
+            model = deepcopy(model).cpu()
 
             with io.BytesIO() as model_bytes:
                 torch.save(model, model_bytes, dill)

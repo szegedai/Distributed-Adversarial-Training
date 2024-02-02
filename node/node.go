@@ -222,7 +222,7 @@ func (self *Node) updateModel() {
 func main() {
   host := flag.String("H", "http://127.0.0.1:8080", "The exact host where the server is running")
   device := flag.String("D", "cpu", "The device the is used by PyTorch for the perturbation process")
-  bufferSize := flag.Uint("B", 5, "The amount of batches preloaded by the node")
+  bufferSize := flag.Uint("B", 2, "The amount of batches preloaded by the node")
 
   flag.Parse()
 
