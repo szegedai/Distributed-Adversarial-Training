@@ -1,7 +1,5 @@
 import torch
 import torch.utils.data as data
-import torch.nn as nn
-import torch.optim as optim
 import time
 import requests
 import dill
@@ -15,19 +13,21 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def __init__(
         self, 
         host='http://127.0.0.1:8080',
-        merge_batches=1,
+        batch_scale=1,
         num_workers=2,
         buffer_size=5,
         pin_memory_device='cpu'
     ):
-        assert type(merge_batches) is int
+        assert \
+            (batch_scale >= 1 and not batch_scale % 1) or (batch_scale < 1 and batch_scale > 0), \
+            'batch_scale must be a positive integer or a float between 1 and 0.'
 
         self.host = host
         self.pin_memory_device = pin_memory_device
         self._mp_ctx = mp.get_context('spawn')
         self._num_batches = -1
         self._num_processed_batches = 0
-        self._merge_batches = merge_batches
+        self._batch_scale = batch_scale
         self._num_workers = num_workers
         self._session = requests.Session()
         self._batch_downloader_processes = []
@@ -38,15 +38,15 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         dill.settings['recurse'] = True 
 
-    def _get_data(self, to):
-        response = self._session.get(f'{self.host}/{to}', verify=False)
+    def _get_data(self, to, timeout=None):
+        response = self._session.get(f'{self.host}/{to}', verify=False, timeout=timeout)
         if response.status_code == 200:
             return response.content
         else:
             raise Exception('GET request failed with status code', response.status_code)
 
-    def _send_data(self, to, data):
-        response = self._session.post(f'{self.host}/{to}', data=data, verify=False)
+    def _send_data(self, to, data, timeout=None):
+        response = self._session.post(f'{self.host}/{to}', data=data, verify=False, timeout=timeout)
         if response.status_code == 200:
             return
         else:
@@ -54,13 +54,21 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def __len__(self):
         if self._num_batches < 0:
-            self._num_batches = int.from_bytes(
-                self._get_data('num_batches'), 
-                'big', 
-                signed=False
-            )
-            # Integer division that rounds up, instead of down.
-            self._num_batches = -(-self._num_batches // self._merge_batches)
+            try:
+                self._num_batches = int.from_bytes(
+                    self._get_data('num_batches', 5), 
+                    'big', 
+                    signed=False
+                )
+            except requests.exceptions.Timeout:
+                raise Exception(
+                    'Request to get the number of batches from server, timed out. This could happen if the remote server setup was not completed properly.'
+                )
+            if self._batch_scale > 1:
+                # Integer division that rounds up, instead of down.
+                self._num_batches = int(-(-self._num_batches // self._batch_scale))
+            else:
+                self._num_batches = int(self._num_batches // self._batch_scale)
 
         return self._num_batches
 
@@ -73,17 +81,10 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def __next__(self):
         if self._num_processed_batches >= self._num_batches:
             self._num_processed_batches = 0
-            raise StopIteration
+            raise StopIteration 
 
-        xes, ys = [], []
-        for _ in range(self._merge_batches):
-            x, y = self._batch_queue.get(block=True, timeout=None)
-            xes.append(x)
-            ys.append(y)
-        batch = (torch.cat(xes), torch.cat(ys))
         self._num_processed_batches += 1
-
-        return batch
+        return self._batch_queue.get(block=True, timeout=None)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -97,7 +98,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self._model_uploader_process = self._mp_ctx.Process(target=self._model_uploader)
         self._model_uploader_process.start()
 
-        len(self)  # Update num_batches is nessesary. 
+        len(self)  # Update num_batches if nessesary. 
 
         self._batch_downloader_processes.clear()
         for _ in range(self._num_workers):
@@ -161,7 +162,27 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
     def _batch_downloader(self):
         while self._running.value:
-            self._batch_queue.put(self.get_batch(), block=True, timeout=None)
+            if self._batch_scale < 1:
+                original_batch = self.get_batch()
+                batch_size = original_batch[0].size(0)
+                indices = torch.arange(0, (1 + self._batch_scale) * batch_size, self._batch_scale * batch_size).to(dtype=torch.int64)
+                for i in range(len(indices) - 1):
+                    batch = (
+                        original_batch[0][indices[i]:indices[i + 1]],
+                        original_batch[1][indices[i]:indices[i + 1]]
+                    )
+                    self._batch_queue.put(batch, block=True, timeout=None)
+            elif self._batch_scale == 1:
+                self._batch_queue.put(self.get_batch(), block=True, timeout=None)
+            else:
+                xes, ys = [], []
+                for _ in range(self._batch_scale):
+                    x, y = self.get_batch()
+                    xes.append(x)
+                    ys.append(y)
+                batch = (torch.cat(xes), torch.cat(ys))
+
+                self._batch_queue.put(batch, block=True, timeout=None)
 
     def _model_uploader(self):
         while self._running.value:

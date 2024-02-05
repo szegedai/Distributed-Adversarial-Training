@@ -26,7 +26,8 @@ class LinfPGDAttack:
             delta = delta.uniform_(-self.eps, self.eps)
             delta = (x + delta).clamp(*self.bounds) - x
 
-        for _ in range(self.num_steps):
+        #for _ in range(self.num_steps):
+        for _ in range(int(torch.empty(1).uniform_(self.num_steps - 5, self.num_steps + 5).item())):
             with torch.enable_grad():
                 delta.requires_grad = True
                 loss = self.loss_fn(self.model(x + delta), y)
@@ -73,7 +74,7 @@ def main():
     #device = torch.device('cpu')
 
     train_loader = DistributedAdversarialDataLoader(
-        merge_batches=1,
+        batch_scale=1,
         pin_memory_device=device
     )
 
@@ -108,7 +109,7 @@ def main():
         {
             'batch_size': 128, 
             'shuffle': True, 
-            'num_workers': 4,
+            'num_workers': 2,
             'prefetch_factor': 2,
             'multiprocessing_context': 'spawn', 
             'persistent_workers': True
@@ -120,9 +121,9 @@ def main():
     test_dataset = torchvision.datasets.CIFAR10(data_path, train=False, transform=test_transform, download=False)
     test_loader = torch.utils.data.DataLoader(
         test_dataset, 
-        batch_size=128, 
+        batch_size=1024, 
         shuffle=False, 
-        num_workers=4, 
+        num_workers=2, 
         prefetch_factor=2, 
         multiprocessing_context='spawn', 
         persistent_workers=True
