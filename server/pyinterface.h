@@ -11,7 +11,8 @@ typedef struct {
 
 extern PyObject* pyModule;
 
-extern PyObject* pyUpdateData;
+extern PyObject* pyUpdateDataset;
+extern PyObject* pyUpdateDataloader;
 extern PyObject* pyGetNumBatches;
 extern PyObject* pyGetCleanBatch;
 
@@ -19,7 +20,9 @@ int initPython();
 
 int finalizePython();
 
-int updateData(bytes_t inputBytes);
+int updateDataset(bytes_t inputBytes);
+
+int updateDataloader(bytes_t inputBytes);
 
 size_t getNumBatches();
 

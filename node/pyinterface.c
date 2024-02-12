@@ -23,6 +23,7 @@ PyObject* pySetDevice;
 PyObject* pyPerturb;
 PyObject* pyUpdateAttack;
 PyObject* pyUpdateModel;
+PyObject* pyUpdateModelState;
 
 int initPython() {
   Py_Initialize();
@@ -52,6 +53,7 @@ int initPython() {
   pyPerturb = PyObject_GetAttrString(pyModule, "perturb");
   pyUpdateAttack = PyObject_GetAttrString(pyModule, "update_attack");
   pyUpdateModel = PyObject_GetAttrString(pyModule, "update_model");
+  pyUpdateModelState = PyObject_GetAttrString(pyModule, "update_model_state");
 
   RELEASE_GIL
 
@@ -65,6 +67,7 @@ int finalizePython() {
   Py_DECREF(pyPerturb);
   Py_DECREF(pyUpdateAttack);
   Py_DECREF(pyUpdateModel);
+  Py_DECREF(pyUpdateModelState);
   Py_DECREF(pyModule);
 
   RELEASE_GIL
@@ -135,6 +138,22 @@ int updateModel(bytes_t inputBytes) {
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
   PyObject* pyResult = PyObject_CallObject(pyUpdateModel, pyArgs);
+
+  Py_DECREF(pyBytes);
+  Py_DECREF(pyArgs);
+  Py_DECREF(pyResult);
+
+  RELEASE_GIL
+
+  return 0;
+}
+
+int updateModelState(bytes_t inputBytes) {
+  AQUIRE_GIL
+
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
+  PyObject* pyResult = PyObject_CallObject(pyUpdateModelState, pyArgs);
 
   Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);

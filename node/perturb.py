@@ -32,18 +32,19 @@ def print_bytes(data):
 @try_exc
 def set_device(new_device):
     global device
+
     device = torch.device(new_device)
 
 @try_exc
 def perturb(encoded_data):
-    global attack, device
+    global attack, model, device
 
     x, y = torch.load(io.BytesIO(encoded_data[8:]), device, dill)
     x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
     new_x = attack.perturb(x, y)
 
     new_data = io.BytesIO()
-    torch.save((new_x, y), new_data, dill)
+    torch.save((new_x, y), new_data, dill, 5)
 
     return b''.join([
         encoded_data[:8].tobytes(),
@@ -52,19 +53,27 @@ def perturb(encoded_data):
 
 @try_exc
 def update_attack(encoded_data):
-    global attack, device
+    global attack, model, device
+
     attack_class, attack_args, attack_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
     encoded_data.release()
-    for arg in attack_args:
-        if isinstance(arg, torch.nn.Module):
-            arg.to(device)
-    attack = attack_class(*attack_args, **attack_kwargs)
+    attack = attack_class(model, *attack_args, **attack_kwargs)
 
 @try_exc
 def update_model(encoded_data):
-    global attack, device
-    new_model = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    global attack, model, device
+
+    model_class, model_args, model_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
     encoded_data.release()
-    attack.model = new_model
-    attack.model.to(device)
+    model = model_class(*model_args, **model_kwargs).to(device)
+
+    if attack:
+        attack.model = model
+
+@try_exc
+def update_model_state(encoded_data):
+    global model, device
+
+    new_state = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    model.load_state_dict(new_state)
 

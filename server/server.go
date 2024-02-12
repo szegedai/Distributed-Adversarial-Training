@@ -63,6 +63,20 @@ func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.R
   })
 }
 
+func printBytes(data []byte) {
+  fmt.Print("Go: ")
+  for i := 0; i < 10; i++ {
+    fmt.Printf("%02X ", data[i])
+  }
+  fmt.Print("... ")
+
+  start := len(data) - 10
+  for i := start; i < len(data); i++ {
+    fmt.Printf("%02X ", data[i])
+  }
+  fmt.Println()
+}
+
 type BatchMeta struct {
   Batch *Batch
   TimeStamp uint64
@@ -82,6 +96,8 @@ type Server struct {
 
   modelData []byte
   modelID uint64
+  modelStateData []byte
+  modelStateID uint64
   modelMutex sync.RWMutex
   attackData []byte
   attackID uint64
@@ -94,10 +110,12 @@ type Server struct {
   doneQ chan *Batch
 
   setupWG sync.WaitGroup
-  finishDataSetup func()
+  finishDatasetSetup func()
+  finishDataloaderSetup func()
   finishParametersSetup func()
   finishAttackSetup func()
   finishModelSetup func()
+  finishModelStateSetup func()
 }
 
 func (self *Server) Reset() {
@@ -105,6 +123,8 @@ func (self *Server) Reset() {
   self.maxPatiente = 0
   self.modelData = nil 
   self.modelID = 0
+  self.modelStateData = nil
+  self.modelStateID = 0
   self.attackData = nil
   self.attackID = 0
   self.nextBatchID = 0
@@ -112,7 +132,10 @@ func (self *Server) Reset() {
   self.workQ = sync.Map{}
   self.doneQ = nil
   self.setupWG = sync.WaitGroup{}
-  self.finishDataSetup = sync.OnceFunc(func() {
+  self.finishDatasetSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
+  self.finishDataloaderSetup = sync.OnceFunc(func() {
     self.setupWG.Done()
   })
   self.finishParametersSetup = sync.OnceFunc(func() {
@@ -124,8 +147,11 @@ func (self *Server) Reset() {
   self.finishModelSetup = sync.OnceFunc(func() {
     self.setupWG.Done()
   })
+  self.finishModelStateSetup = sync.OnceFunc(func() {
+    self.setupWG.Done()
+  })
 
-  self.setupWG.Add(4)
+  self.setupWG.Add(6)
 }
 
 func (self *Server) Run() {
@@ -139,11 +165,13 @@ func (self *Server) Run() {
 
   dispathRequest("/attack", self.onGetAttack, self.onPostAttack)
   dispathRequest("/model", self.onGetModel, self.onPostModel)
+  dispathRequest("/model_state", self.onGetModelState, self.onPostModelState)
   dispathRequest("/adv_batch", self.onGetAdvBatch, self.onPostAdvBatch)
   dispathRequest("/clean_batch", self.onGetCleanBatch, nil)
   dispathRequest("/ids", self.onGetIDs, nil)
   dispathRequest("/num_batches", self.onGetNumBatches, nil)
-  dispathRequest("/data", nil, self.onPostData)
+  dispathRequest("/dataset", nil, self.onPostDataset)
+  dispathRequest("/dataloader", nil, self.onPostDataloader)
   dispathRequest("/parameters", nil, self.onPostParameters)
   http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
     log.Println("Reseting server")
@@ -172,20 +200,6 @@ func (self *Server) Run() {
       log.Println(err)
   }
   log.Println("Server stopped gracefully.")
-}
-
-func printBytes(data []byte) {
-  fmt.Print("Go: ")
-  for i := 0; i < 10; i++ {
-    fmt.Printf("%02X ", data[i])
-  }
-  fmt.Print("... ")
-
-  start := len(data) - 10
-  for i := start; i < len(data); i++ {
-    fmt.Printf("%02X ", data[i])
-  }
-  fmt.Println()
 }
 
 func (self *Server) loadCleanBatch() {
@@ -247,7 +261,29 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   self.modelID += 1
   self.modelMutex.Unlock()
 
-  // Move every expired batch back to the freeQ, to redo them.
+  self.finishModelSetup()
+}
+
+func (self *Server) onGetModelState(w http.ResponseWriter, r *http.Request) {
+  self.setupWG.Wait()
+
+  self.modelMutex.RLock()
+  w.Write(self.modelStateData)
+  self.modelMutex.RUnlock()
+}
+
+func (self *Server) onPostModelState(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal(err)
+  }
+
+  self.modelMutex.Lock()
+  self.modelStateData = data
+  self.modelStateID += 1
+  self.modelMutex.Unlock()
+
+  // Resend expired batches.
   self.workQ.Range(func(batchID any, batchMeta any) bool {
     self.modelMutex.RLock()
     if self.modelID - batchMeta.(BatchMeta).TimeStamp > self.maxPatiente {
@@ -263,7 +299,7 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
     return true
   })
 
-  self.finishModelSetup()
+  self.finishModelStateSetup()
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
@@ -331,21 +367,33 @@ func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
   w.Write(numBatchesBytes)
 }
 
-func (self *Server) onPostData(w http.ResponseWriter, r *http.Request) {
+func (self *Server) onPostDataset(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
 
   if err != nil {
     log.Fatal(err)
   }
   
-  C.updateData(GB2CB(data))
+  C.updateDataset(GB2CB(data))
+
+  self.finishDatasetSetup()
+}
+
+func (self *Server) onPostDataloader(w http.ResponseWriter, r *http.Request) {
+  data, err := ioutil.ReadAll(r.Body)
+
+  if err != nil {
+    log.Fatal(err)
+  }
+  
+  C.updateDataloader(GB2CB(data))
 
   var i uint64
   for i = 0; i < self.queueLimit; i++ {
     self.loadCleanBatch()
   }
 
-  self.finishDataSetup()
+  self.finishDataloaderSetup()
 }
 
 func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {

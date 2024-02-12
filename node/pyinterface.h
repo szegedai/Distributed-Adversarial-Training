@@ -15,6 +15,7 @@ extern PyObject* pySetDevice;
 extern PyObject* pyPerturb;
 extern PyObject* pyUpdateAttack;
 extern PyObject* pyUpdateModel;
+extern PyObject* pyUpdateModelState;
 
 int initPython();
 
@@ -27,5 +28,7 @@ bytes_t perturb(bytes_t inputBytes);
 int updateAttack(bytes_t inputBytes);
 
 int updateModel(bytes_t inputBytes);
+
+int updateModelState(bytes_t inputBytes);
 
 #endif

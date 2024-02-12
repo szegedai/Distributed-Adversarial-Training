@@ -63,6 +63,7 @@ type Node struct {
   running bool
   attackID uint64
   modelID uint64
+  modelStateID uint64
 }
 
 func (self *Node) Run() {
@@ -98,14 +99,15 @@ func (self *Node) Run() {
   self.mainWG.Add(2)
   go func() {
     defer self.mainWG.Done()
-    self.attackID, self.modelID = self.getIDs()
+    self.attackID, self.modelID, self.modelStateID = self.getIDs()
   }()
 
-  self.mainWG.Add(3)
+  self.mainWG.Add(4)
   go func() {
     defer self.mainWG.Done()
-    self.updateAttack()
     self.updateModel()
+    self.updateModelState()
+    self.updateAttack()
   }()
 
   for i := (uint16)(0); i < self.BufferSize; i++ {
@@ -135,7 +137,14 @@ func (self *Node) Run() {
       defer self.mainWG.Done()
 
       self.mainWG.Add(1)
-      latestAttackID, latestModelID := self.getIDs()
+      latestAttackID, latestModelID, latestModelStateID := self.getIDs()
+
+      if latestModelStateID != self.modelStateID {
+        self.modelStateID = latestModelStateID
+
+        self.mainWG.Add(1)
+        go self.updateModelState()
+      }
 
       if latestAttackID != self.attackID {
         self.attackID = latestAttackID
@@ -197,11 +206,11 @@ func (self *Node) postAdvBatch() {
   self.postData("/adv_batch", <-self.advBatchBuffer)
 }
 
-func (self *Node) getIDs() (uint64, uint64) {
+func (self *Node) getIDs() (uint64, uint64, uint64) {
   defer self.mainWG.Done()
 
   data := self.getData("/ids")
-  return binary.BigEndian.Uint64(data[:8]), binary.BigEndian.Uint64(data[8:])
+  return binary.BigEndian.Uint64(data[:8]), binary.BigEndian.Uint64(data[8:16]), binary.BigEndian.Uint64(data[16:])
 }
 
 func (self *Node) updateAttack() {
@@ -216,6 +225,13 @@ func (self *Node) updateModel() {
 
   data := self.getData("/model")
   C.updateModel(GB2CB(data))
+}
+
+func (self *Node) updateModelState() {
+  defer self.mainWG.Done()
+
+  data := self.getData("/model_state")
+  C.updateModelState(GB2CB(data))
 }
 
 

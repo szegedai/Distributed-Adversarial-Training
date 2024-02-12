@@ -22,7 +22,8 @@ void print_bytes(bytes_t cBytes) {
 
 PyObject* pyModule;
 
-PyObject* pyUpdateData;
+PyObject* pyUpdateDataset;
+PyObject* pyUpdateDataloader;
 PyObject* pyGetNumBatches;
 PyObject* pyGetCleanBatch;
 
@@ -50,7 +51,8 @@ int initPython() {
   else
     PyErr_Print();
 
-  pyUpdateData = PyObject_GetAttrString(pyModule, "update_data");
+  pyUpdateDataset = PyObject_GetAttrString(pyModule, "update_dataset");
+  pyUpdateDataloader = PyObject_GetAttrString(pyModule, "update_dataloader");
   pyGetNumBatches = PyObject_GetAttrString(pyModule, "get_num_batches");
   pyGetCleanBatch = PyObject_GetAttrString(pyModule, "get_clean_batch");
 
@@ -62,7 +64,8 @@ int initPython() {
 int finalizePython() {
   AQUIRE_GIL
 
-  Py_DECREF(pyUpdateData);
+  Py_DECREF(pyUpdateDataset);
+  Py_DECREF(pyUpdateDataloader);
   Py_DECREF(pyGetNumBatches);
   Py_DECREF(pyGetCleanBatch);
   Py_DECREF(pyModule);
@@ -74,12 +77,28 @@ int finalizePython() {
   return 0;
 }
 
-int updateData(bytes_t inputBytes) {
+int updateDataset(bytes_t inputBytes) {
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
-  PyObject* pyResult = PyObject_CallObject(pyUpdateData, pyArgs);
+  PyObject* pyResult = PyObject_CallObject(pyUpdateDataset, pyArgs);
+
+  Py_DECREF(pyBytes);
+  Py_DECREF(pyArgs);
+  Py_DECREF(pyResult);
+
+  RELEASE_GIL
+
+  return 0;
+}
+
+int updateDataloader(bytes_t inputBytes) {
+  AQUIRE_GIL
+
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
+  PyObject* pyResult = PyObject_CallObject(pyUpdateDataloader, pyArgs);
 
   Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);

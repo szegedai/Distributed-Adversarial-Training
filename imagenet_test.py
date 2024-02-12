@@ -55,15 +55,13 @@ class CSVLoggerCallback(Callback):
             csv.writer(fp).writerow(training_vars['metrics'].values())
 
 
-class ModelUploaderCallback(Callback):
+class ModelStateUploaderCallback(Callback):
     def __init__(self, upload_frequency=1):
         self.upload_frequency = upload_frequency
-        self._model = None
-        self._train_loader = None
 
     def on_batch_end(self, training_vars):
         if training_vars['batch_idx'] % self.upload_frequency == 0:
-            training_vars['train_loader'].update_model(training_vars['model'])
+            training_vars['train_loader'].update_model_state(training_vars['model'].state_dict())
 
 
 def main():
@@ -89,10 +87,12 @@ def main():
         torchvision.transforms.RandomHorizontalFlip()
     ])
 
-    train_loader.update_model(net)
+    train_loader.update_model(
+        wide_resnet28v1x10,
+        1000
+    )
     train_loader.update_attack(
         LinfPGDAttack,
-        net,
         torch.nn.CrossEntropyLoss(),
         8 / 255,
         2 / 255,
@@ -100,25 +100,19 @@ def main():
     )
 
     train_loader.set_parameters(max_patiente=100, queue_limit=10)
-    train_loader.update_data(
-        torchvision.datasets.ImageFolder, 
-        [
-            data_path + "/training_data"
-        ], 
-        {
-            "transform": train_transform, 
-        },
-        [],
-        {
-            'batch_size': 64, 
-            'shuffle': True, 
-            'num_workers': 8, 
-            'prefetch_factor': 4,
-            'multiprocessing_context': 'spawn', 
-            'persistent_workers': True
-        }
+    train_loader.update_dataset(
+        torchvision.datasets.ImageFolder,
+        data_path + '/training_data',
+        transform=train_transform
     )
-
+    train_loader.update_dataloader(
+        batch_size=64, 
+        shuffle=True, 
+        num_workers=8, 
+        prefetch_factor=4,
+        multiprocessing_context='spawn', 
+        persistent_workers=True
+    )
     train_loader.start()
 
     criterion = torch.nn.CrossEntropyLoss()
@@ -128,7 +122,7 @@ def main():
         net, criterion, optimizer, train_loader, None, None,
         callbacks=[
             CLILoggerCallback(),
-            ModelUploaderCallback(2)
+            ModelStateUploaderCallback(2)
             #CSVLoggerCallback(save_path + '/training3_logs.csv'),
         ],
         num_epochs=200
@@ -138,3 +132,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

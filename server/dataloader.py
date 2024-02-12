@@ -30,15 +30,18 @@ def print_bytes(data):
     print()
 
 @try_exc
-def update_data(data_bytes):
-    global dataloader, dataloader_iter
+def update_dataset(encoded_data):
+    global dataset
 
-    ds_class, ds_args, ds_kwargs, dl_args, dl_kwargs = dill.loads(data_bytes)
-    dataloader = torch.utils.data.DataLoader(
-        ds_class(*ds_args, **ds_kwargs), 
-        *dl_args, 
-        **dl_kwargs
-    )
+    ds_class, ds_args, ds_kwargs = dill.loads(encoded_data)
+    dataset = ds_class(*ds_args, **ds_kwargs)
+
+@try_exc
+def update_dataloader(encoded_data):
+    global dataset, dataloader, dataloader_iter
+
+    dl_class, dl_args, dl_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), None, dill)
+    dataloader = dl_class(dataset, *dl_args, **dl_kwargs)
     dataloader_iter = iter(dataloader)
 
 @try_exc
