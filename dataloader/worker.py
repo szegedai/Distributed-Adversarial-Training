@@ -2,7 +2,7 @@ import torch
 import torch.utils.data as data
 import time
 import requests
-import dill
+import cloudpickle
 import io
 import torch.multiprocessing as mp
 import queue
@@ -43,18 +43,28 @@ class DistributedAdversarialDataLoader(data.DataLoader):
             'set_parameters': True
         }
 
-        #dill.settings['recurse'] = True 
+        #dill.settings['recurse'] = True
+
+    @staticmethod
+    def sync_external_modules(modules):
+        for m in modules:
+            cloudpickle.register_pickle_by_value(m)
+
+    @staticmethod
+    def unsync_external_modules(modules):
+        for m in modules:
+            cloudpickle.unregister_pickle_by_value(m)
 
     @staticmethod
     def _serialize_data(obj):
         with io.BytesIO() as data_bytes:
-            torch.save(obj, data_bytes, dill, 5)
+            torch.save(obj, data_bytes)
             return data_bytes.getvalue()
 
     @staticmethod
     def _deserialize_data(data, device=None):
         with io.BytesIO(data) as data_bytes:
-            return torch.load(data_bytes, device, dill)
+            return torch.load(data_bytes, device)
 
     def _get_data(self, to, timeout=None):
         response = self._session.get(f'{self.host}/{to}', verify=False, timeout=timeout)
@@ -131,13 +141,14 @@ class DistributedAdversarialDataLoader(data.DataLoader):
                 
         for p in self._batch_downloader_processes:
             p.terminate()
-            p.join()
+            p.join() 
 
-    def update_attack(self, attack_class, *attack_args, **attack_kwargs): 
+    def update_attack(self, attack_class, *attack_args, **attack_kwargs):
         self._send_data(
             'attack', 
-            self._serialize_data(
-                (attack_class, attack_args, attack_kwargs)
+            cloudpickle.dumps(
+                (attack_class, attack_args, attack_kwargs),
+                protocol=5
             )
         )
         self._required_to_start['update_attack'] = False
@@ -145,8 +156,9 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def update_dataset(self, dataset_class, *dataset_args, **dataset_kwargs):
         self._send_data(
             'dataset', 
-            self._serialize_data(
-                (dataset_class, dataset_args, dataset_kwargs)
+            cloudpickle.dumps(
+                (dataset_class, dataset_args, dataset_kwargs),
+                protocol=5
             )
         )
         self._required_to_start['update_dataset'] = False
@@ -154,8 +166,9 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def update_dataloader(self, dataloader_class, *dataloader_args, **dataloader_kwargs):
         self._send_data(
             'dataloader',
-            self._serialize_data(
-                (dataloader_class, dataloader_args, dataloader_kwargs)
+            cloudpickle.dumps(
+                (dataloader_class, dataloader_args, dataloader_kwargs),
+                protocol=5
             )
         )
         self._required_to_start['update_dataloader'] = False
@@ -163,8 +176,9 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def update_model(self, model_class, *model_args, **model_kwargs):
         self._send_data(
             'model',
-            self._serialize_data(
-                (model_class, model_args, model_kwargs)
+            cloudpickle.dumps(
+                (model_class, model_args, model_kwargs),
+                protocol=5
             )
         )
         self._required_to_start['update_model'] = False

@@ -1,6 +1,6 @@
 import torch
-import dill
 import io
+import pickle
 import traceback
 
 
@@ -39,12 +39,12 @@ def set_device(new_device):
 def perturb(encoded_data):
     global attack, model, device
 
-    x, y = torch.load(io.BytesIO(encoded_data[8:]), device, dill)
+    x, y = torch.load(io.BytesIO(encoded_data[8:]), device)
     x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
     new_x = attack.perturb(x, y)
 
     new_data = io.BytesIO()
-    torch.save((new_x, y), new_data, dill, 5)
+    torch.save((new_x, y), new_data)
 
     return b''.join([
         encoded_data[:8].tobytes(),
@@ -55,7 +55,7 @@ def perturb(encoded_data):
 def update_attack(encoded_data):
     global attack, model, device
 
-    attack_class, attack_args, attack_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    attack_class, attack_args, attack_kwargs = pickle.loads(encoded_data.tobytes())
     encoded_data.release()
     attack = attack_class(model, *attack_args, **attack_kwargs)
 
@@ -63,7 +63,7 @@ def update_attack(encoded_data):
 def update_model(encoded_data):
     global attack, model, device
 
-    model_class, model_args, model_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    model_class, model_args, model_kwargs = pickle.loads(encoded_data.tobytes())
     encoded_data.release()
     model = model_class(*model_args, **model_kwargs).to(device)
 
@@ -74,6 +74,13 @@ def update_model(encoded_data):
 def update_model_state(encoded_data):
     global model, device
 
-    new_state = torch.load(io.BytesIO(encoded_data.tobytes()), device, dill)
+    new_state = torch.load(io.BytesIO(encoded_data.tobytes()), device)
     model.load_state_dict(new_state)
+
+
+device = None
+attack = None
+model = None
+dataset = None
+dataloader = None
 

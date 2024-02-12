@@ -351,11 +351,14 @@ func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
   
   attackIDBytes := make([]byte, 8)
   modelIDBytes := make([]byte, 8)
+  modelStateIDBytes := make([]byte, 8)
   binary.BigEndian.PutUint64(attackIDBytes, self.attackID)
   binary.BigEndian.PutUint64(modelIDBytes, self.modelID)
+  binary.BigEndian.PutUint64(modelStateIDBytes, self.modelID)
 
   w.Write(attackIDBytes)
   w.Write(modelIDBytes)
+  w.Write(modelStateIDBytes)
 }
 
 func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {

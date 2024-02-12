@@ -69,7 +69,7 @@ type Node struct {
 func (self *Node) Run() {
   // TODO: Check if a valid host name and device was given!
 
-  log.Println("Starting node, with config: { Host:", self.Host, "Device:", self.Device, "BufferSize:", self.BufferSize, "}")
+  log.Println("Starting node with config: { Host:", self.Host, "Device:", self.Device, "BufferSize:", self.BufferSize, "}")
 
   self.running = true
   c := make(chan os.Signal)

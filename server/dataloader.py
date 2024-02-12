@@ -1,6 +1,6 @@
 import traceback
 import torch
-import dill
+import pickle
 import io
 
 def try_exc(f):
@@ -33,14 +33,14 @@ def print_bytes(data):
 def update_dataset(encoded_data):
     global dataset
 
-    ds_class, ds_args, ds_kwargs = dill.loads(encoded_data)
+    ds_class, ds_args, ds_kwargs = pickle.loads(encoded_data.tobytes())
     dataset = ds_class(*ds_args, **ds_kwargs)
 
 @try_exc
 def update_dataloader(encoded_data):
     global dataset, dataloader, dataloader_iter
 
-    dl_class, dl_args, dl_kwargs = torch.load(io.BytesIO(encoded_data.tobytes()), None, dill)
+    dl_class, dl_args, dl_kwargs = pickle.loads(encoded_data.tobytes())
     dataloader = dl_class(dataset, *dl_args, **dl_kwargs)
     dataloader_iter = iter(dataloader)
 
@@ -61,7 +61,7 @@ def get_clean_batch():
         batch = next(dataloader_iter)
 
     batch_bytes = io.BytesIO()
-    torch.save(batch, batch_bytes, dill)
+    torch.save(batch, batch_bytes)
 
     return batch_bytes.getvalue()
 

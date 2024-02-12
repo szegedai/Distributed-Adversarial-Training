@@ -1,6 +1,7 @@
 import torch
 import torchvision
 import csv
+import nn_utils
 from dataloader.worker import DistributedAdversarialDataLoader
 from nn_utils.training import train_classifier, LRSchedulerCallback, CLILoggerCallback, Callback
 from nn_utils.models.resnet_v1 import wide_resnet28v1x10
@@ -65,7 +66,7 @@ class ModelStateUploaderCallback(Callback):
 
 
 def main():
-    data_path = '/imagenet'
+    data_path = '/server/imagenet_data'
     save_path = '.'
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cpu')
@@ -87,10 +88,10 @@ def main():
         torchvision.transforms.RandomHorizontalFlip()
     ])
 
-    train_loader.update_model(
-        wide_resnet28v1x10,
-        1000
-    )
+    train_loader.sync_external_modules([nn_utils])
+
+    train_loader.update_model_state(net.state_dict())
+    train_loader.update_model(wide_resnet28v1x10, 1000)
     train_loader.update_attack(
         LinfPGDAttack,
         torch.nn.CrossEntropyLoss(),
@@ -98,7 +99,6 @@ def main():
         2 / 255,
         10
     )
-
     train_loader.set_parameters(max_patiente=100, queue_limit=10)
     train_loader.update_dataset(
         torchvision.datasets.ImageFolder,
@@ -106,7 +106,8 @@ def main():
         transform=train_transform
     )
     train_loader.update_dataloader(
-        batch_size=64, 
+        torch.utils.data.DataLoader,
+        batch_size=1, 
         shuffle=True, 
         num_workers=8, 
         prefetch_factor=4,
