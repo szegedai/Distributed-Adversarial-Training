@@ -5,20 +5,18 @@ package main
 */
 import "C"
 import (
-	"context"
+	"encoding/binary"
+	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"reflect"
+	"sync"
 	"syscall"
-	"time"
 	"unsafe"
-  "sync"
-  "encoding/binary"
-  "flag"
-  "fmt"
 )
 
 func GB2CB(b []byte) C.bytes_t {
@@ -77,6 +75,61 @@ func printBytes(data []byte) {
   fmt.Println()
 }
 
+const (
+  SETUP_ATTACK = iota
+  SETUP_MODEL
+  SETUP_MODEL_STATE
+  SETUP_DATASET
+  SETUP_DATALOADER
+  SETUP_PARAMETERS
+)
+
+type TODOSync struct {
+  todos []sync.Once
+  doneWG sync.WaitGroup
+  doneCount int
+  mutex sync.Mutex
+}
+
+func (self *TODOSync) Init(length int) {
+  self.mutex = sync.Mutex{}
+
+  self.mutex.Lock()
+
+  self.doneWG = sync.WaitGroup{}
+  self.doneWG.Add(length)
+  self.doneCount = length
+  self.todos = make([]sync.Once, length)
+
+  self.mutex.Unlock()
+}
+
+func (self *TODOSync) Reset() {
+  self.mutex.Lock()
+
+  length := len(self.todos)
+  self.doneWG.Add(length - self.doneCount)
+  self.doneCount = length
+  self.todos = make([]sync.Once, length)
+
+  self.mutex.Unlock()
+}
+
+func (self *TODOSync) Done(idx int) {
+  self.todos[idx].Do(func() {
+    self.mutex.Lock()
+
+    self.doneWG.Done()
+    self.doneCount--
+
+    self.mutex.Unlock()
+  })
+}
+
+func (self *TODOSync) Wait() {
+  self.doneWG.Wait()
+}
+
 type BatchMeta struct {
   Batch *Batch
   TimeStamp uint64
@@ -109,13 +162,7 @@ type Server struct {
   workQ sync.Map
   doneQ chan *Batch
 
-  setupWG sync.WaitGroup
-  finishDatasetSetup func()
-  finishDataloaderSetup func()
-  finishParametersSetup func()
-  finishAttackSetup func()
-  finishModelSetup func()
-  finishModelStateSetup func()
+  setup *TODOSync
 }
 
 func (self *Server) Reset() {
@@ -128,30 +175,38 @@ func (self *Server) Reset() {
   self.attackData = nil
   self.attackID = 0
   self.nextBatchID = 0
+
+  if self.freeQ != nil {
+    //close(self.freeQ)
+    empty := false
+    for !empty {
+      select {
+      case <-self.freeQ:
+      default:
+         empty = true
+      }
+    }
+  }
+  if self.doneQ != nil {
+    //close(self.doneQ)
+    empty := false
+    for !empty {
+      select {
+      case <-self.doneQ:
+      default:
+         empty = true
+      }
+    }
+  }
   self.freeQ = nil
   self.workQ = sync.Map{}
   self.doneQ = nil
-  self.setupWG = sync.WaitGroup{}
-  self.finishDatasetSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-  self.finishDataloaderSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-  self.finishParametersSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-  self.finishAttackSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-  self.finishModelSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-  self.finishModelStateSetup = sync.OnceFunc(func() {
-    self.setupWG.Done()
-  })
-
-  self.setupWG.Add(6)
+  
+  if self.setup == nil {
+    self.setup = &TODOSync{}
+    self.setup.Init(6)
+  }
+  self.setup.Reset()
 }
 
 func (self *Server) Run() {
@@ -182,25 +237,14 @@ func (self *Server) Run() {
 
   go func() {
     if err := httpServer.ListenAndServe(); err != nil {
-      log.Fatal(err)
+      log.Fatalln(err)
     }
   }()
 
   log.Println("Ready and running")
 
   <-stop
-  
-  ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
-  defer cancel()
-
-  if err := httpServer.Shutdown(ctx); err != nil {
-      log.Println(err)
-  }
-  if err := httpServer.Close(); err != nil {
-      log.Println(err)
-  }
-  log.Println("Server stopped gracefully.")
-}
+ }
 
 func (self *Server) loadCleanBatch() {
   self.nextBatchIDMutex.Lock()
@@ -218,7 +262,7 @@ func (self *Server) loadCleanBatch() {
 }
 
 func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   self.attackMutex.RLock()
   w.Write(self.attackData)
@@ -228,7 +272,8 @@ func (self *Server) onGetAttack(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
 
   self.attackMutex.Lock()
@@ -239,11 +284,11 @@ func (self *Server) onPostAttack(w http.ResponseWriter, r *http.Request) {
   //TODO: Handle the case when the attack is updated during the training!
   // Resend batches that are currently being worked on or do not bother?
 
-  self.finishAttackSetup()
+  self.setup.Done(SETUP_ATTACK)
 }
 
 func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   self.modelMutex.RLock()
   w.Write(self.modelData)
@@ -253,7 +298,8 @@ func (self *Server) onGetModel(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
 
   self.modelMutex.Lock()
@@ -261,11 +307,13 @@ func (self *Server) onPostModel(w http.ResponseWriter, r *http.Request) {
   self.modelID += 1
   self.modelMutex.Unlock()
 
-  self.finishModelSetup()
+  self.setup.Done(SETUP_MODEL)
+
+  log.Println("Model architecture updated")
 }
 
 func (self *Server) onGetModelState(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   self.modelMutex.RLock()
   w.Write(self.modelStateData)
@@ -275,7 +323,8 @@ func (self *Server) onGetModelState(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostModelState(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
 
   self.modelMutex.Lock()
@@ -299,11 +348,11 @@ func (self *Server) onPostModelState(w http.ResponseWriter, r *http.Request) {
     return true
   })
 
-  self.finishModelStateSetup()
+  self.setup.Done(SETUP_MODEL_STATE)
 }
 
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   w.Write((<-self.doneQ).Adv)
 }
@@ -311,7 +360,8 @@ func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
 
   batchID := binary.BigEndian.Uint64(data[0:8])
@@ -329,7 +379,7 @@ func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   batch := <-self.freeQ
 
@@ -347,7 +397,7 @@ func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
   
   attackIDBytes := make([]byte, 8)
   modelIDBytes := make([]byte, 8)
@@ -362,7 +412,7 @@ func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
-  self.setupWG.Wait()
+  self.setup.Wait()
 
   numBatchesBytes := make([]byte, 8)
   binary.BigEndian.PutUint64(numBatchesBytes, uint64(C.getNumBatches()))
@@ -372,21 +422,23 @@ func (self *Server) onGetNumBatches(w http.ResponseWriter, r *http.Request) {
 
 func (self *Server) onPostDataset(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
-
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
   
   C.updateDataset(GB2CB(data))
 
-  self.finishDatasetSetup()
+  self.setup.Done(SETUP_DATASET)
+
+  log.Println("Dataset updated")
 }
 
 func (self *Server) onPostDataloader(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
-
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
   
   C.updateDataloader(GB2CB(data))
@@ -396,13 +448,16 @@ func (self *Server) onPostDataloader(w http.ResponseWriter, r *http.Request) {
     self.loadCleanBatch()
   }
 
-  self.finishDataloaderSetup()
+  self.setup.Done(SETUP_DATALOADER)
+
+  log.Println("Dataloader updated")
 }
 
 func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
   if err != nil {
-    log.Fatal(err)
+    log.Println(err)
+    return
   }
 
   self.maxPatiente = binary.BigEndian.Uint64(data[0:8])
@@ -411,7 +466,7 @@ func (self *Server) onPostParameters(w http.ResponseWriter, r *http.Request) {
   self.freeQ = make(chan *Batch, self.queueLimit)
   self.doneQ = make(chan *Batch, self.queueLimit)
 
-  self.finishParametersSetup()
+  self.setup.Done(SETUP_PARAMETERS)
 
   log.Println("Parameters updated: { MaxPatiente:", self.maxPatiente, "QueueLimit:", self.queueLimit, "}")
 }

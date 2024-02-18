@@ -115,7 +115,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         # Setup the correct number of batches.
         self._num_batches = int.from_bytes(
-            self._get_data('num_batches', 5), 
+            self._get_data('num_batches'), 
             'big', 
             signed=False
         )

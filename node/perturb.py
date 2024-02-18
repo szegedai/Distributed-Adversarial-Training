@@ -2,6 +2,7 @@ import torch
 import io
 import pickle
 import traceback
+from time import time
 
 
 def try_exc(f):
@@ -40,7 +41,7 @@ def perturb(encoded_data):
     global attack, model, device
 
     x, y = torch.load(io.BytesIO(encoded_data[8:]), device)
-    x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+    #x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
     new_x = attack.perturb(x, y)
 
     new_data = io.BytesIO()
