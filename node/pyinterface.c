@@ -20,10 +20,11 @@ void printBytes(bytes_t cBytes) {
 PyObject* pyModule;
 
 PyObject* pySetDevice;
-PyObject* pyPerturb;
+PyObject* pyPushBatch;
+PyObject* pyPopBatch;
+PyObject* pyPushModelState;
 PyObject* pyUpdateAttack;
 PyObject* pyUpdateModel;
-PyObject* pyUpdateModelState;
 
 int initPython() {
   Py_Initialize();
@@ -34,7 +35,7 @@ int initPython() {
   PyObject* path = PyObject_GetAttrString(sys, "path");
   PyList_Append(path, PyUnicode_DecodeFSDefault("."));
 
-  PyObject* ModuleString = PyUnicode_DecodeFSDefault((char*)"perturb");
+  PyObject* ModuleString = PyUnicode_DecodeFSDefault((char*)"generator");
  
   if (!ModuleString) 
     PyErr_Print();
@@ -50,10 +51,11 @@ int initPython() {
     PyErr_Print();
 
   pySetDevice = PyObject_GetAttrString(pyModule, "set_device");
-  pyPerturb = PyObject_GetAttrString(pyModule, "perturb");
+  pyPushBatch = PyObject_GetAttrString(pyModule, "push_batch");
+  pyPopBatch = PyObject_GetAttrString(pyModule, "pop_batch");
+  pyPushModelState = PyObject_GetAttrString(pyModule, "push_model_state");
   pyUpdateAttack = PyObject_GetAttrString(pyModule, "update_attack");
   pyUpdateModel = PyObject_GetAttrString(pyModule, "update_model");
-  pyUpdateModelState = PyObject_GetAttrString(pyModule, "update_model_state");
 
   RELEASE_GIL
 
@@ -64,10 +66,11 @@ int finalizePython() {
   AQUIRE_GIL
 
   Py_DECREF(pySetDevice);
-  Py_DECREF(pyPerturb);
+  Py_DECREF(pyPushBatch);
+  Py_DECREF(pyPopBatch);
+  Py_DECREF(pyPushModelState);
   Py_DECREF(pyUpdateAttack);
   Py_DECREF(pyUpdateModel);
-  Py_DECREF(pyUpdateModelState);
   Py_DECREF(pyModule);
 
   RELEASE_GIL
@@ -93,12 +96,27 @@ int setDevice(char* newDevice) {
   return 0;
 }
 
-bytes_t perturb(bytes_t inputBytes) {
+int pushBatch(bytes_t inputBytes) {
   AQUIRE_GIL
 
   PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
   PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
-  PyObject* pyResult = PyObject_CallObject(pyPerturb, pyArgs);
+  PyObject* pyResult = PyObject_CallObject(pyPushBatch, pyArgs);
+
+  Py_DECREF(pyBytes);
+  Py_DECREF(pyArgs);
+  Py_DECREF(pyResult);
+
+  RELEASE_GIL
+
+  return 0;
+}
+
+bytes_t popBatch() {
+  AQUIRE_GIL
+
+  PyObject* pyArgs = PyTuple_Pack(0);
+  PyObject* pyResult = PyObject_CallObject(pyPopBatch, pyArgs);
 
   int8_t* pyInternalBytes = PyBytes_AsString(pyResult);
   size_t numBytes = PyBytes_Size(pyResult);
@@ -107,13 +125,28 @@ bytes_t perturb(bytes_t inputBytes) {
   // Copy the data to not refer to the internal Python memory.
   memcpy(outputBytes.data, pyInternalBytes, outputBytes.size);
 
-  Py_DECREF(pyBytes);
   Py_DECREF(pyArgs);
   Py_DECREF(pyResult);
 
   RELEASE_GIL
 
   return outputBytes;
+}
+
+int pushModelState(bytes_t inputBytes) {
+  AQUIRE_GIL
+
+  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
+  PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
+  PyObject* pyResult = PyObject_CallObject(pyPushModelState, pyArgs);
+
+  Py_DECREF(pyBytes);
+  Py_DECREF(pyArgs);
+  Py_DECREF(pyResult);
+
+  RELEASE_GIL
+
+  return 0;
 }
 
 int updateAttack(bytes_t inputBytes) {
@@ -148,18 +181,3 @@ int updateModel(bytes_t inputBytes) {
   return 0;
 }
 
-int updateModelState(bytes_t inputBytes) {
-  AQUIRE_GIL
-
-  PyObject* pyBytes = PyMemoryView_FromMemory(inputBytes.data, inputBytes.size, PyBUF_READ);
-  PyObject* pyArgs = PyTuple_Pack(1, pyBytes);
-  PyObject* pyResult = PyObject_CallObject(pyUpdateModelState, pyArgs);
-
-  Py_DECREF(pyBytes);
-  Py_DECREF(pyArgs);
-  Py_DECREF(pyResult);
-
-  RELEASE_GIL
-
-  return 0;
-}

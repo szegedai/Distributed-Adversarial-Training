@@ -56,8 +56,6 @@ type Node struct {
   Host string
   Device string
   BufferSize uint16
-  cleanBatchBuffer chan []byte
-  advBatchBuffer chan []byte
   session http.Client
   mainWG sync.WaitGroup
   running bool
@@ -82,9 +80,6 @@ func (self *Node) Run() {
     os.Exit(0)
   }()
 
-  self.cleanBatchBuffer = make(chan []byte, self.BufferSize)
-  self.advBatchBuffer = make(chan []byte, self.BufferSize)
-
   C.initPython()
   defer C.finalizePython()
 
@@ -96,42 +91,30 @@ func (self *Node) Run() {
 
   log.Println("Ready and running")
 
-  self.mainWG.Add(2)
+  self.mainWG.Add(1)
   go func() {
-    defer self.mainWG.Done()
     self.attackID, self.modelID, self.modelStateID = self.getIDs()
   }()
 
-  self.mainWG.Add(4)
+  self.mainWG.Add(1)
   go func() {
     defer self.mainWG.Done()
-    self.updateModel()
-    self.updateModelState()
-    self.updateAttack()
+    C.updateModel(GB2CB(self.getData("/model")))
+    C.pushModelState(GB2CB(self.getData("/model_state")))
+    C.updateAttack(GB2CB(self.getData("/attack")))
   }()
 
   for i := (uint16)(0); i < self.BufferSize; i++ {
     self.mainWG.Add(1)
-    go self.getCleanBatch()
+    go func() {
+      defer self.mainWG.Done()
+      C.pushBatch(GB2CB(self.getData("/clean_batch")))
+    }()
   }
   
   self.mainWG.Wait()
   
   for self.running {
-    self.mainWG.Add(1)
-    go func() {
-      defer self.mainWG.Done()
-
-      batchBytes := <-self.cleanBatchBuffer
-      batchBytes = CB2GB(C.perturb(GB2CB(batchBytes)))
-      self.advBatchBuffer <- batchBytes
-
-      self.mainWG.Add(2)
-      go self.postAdvBatch()
-      go self.getCleanBatch()
-
-    }()
-
     self.mainWG.Add(1)
     go func() {
       defer self.mainWG.Done()
@@ -143,24 +126,46 @@ func (self *Node) Run() {
         self.modelStateID = latestModelStateID
 
         self.mainWG.Add(1)
-        go self.updateModelState()
+        go func() {
+          defer self.mainWG.Done() 
+          C.pushModelState(GB2CB(self.getData("/model_state")))
+        }()
       }
 
       if latestAttackID != self.attackID {
         self.attackID = latestAttackID
 
         self.mainWG.Add(1)
-        go self.updateAttack()
+        go func() {
+          defer self.mainWG.Done()
+          C.updateAttack(GB2CB(self.getData("/attack")))
+        }()
       }
       
       if latestModelID != self.modelID {
         self.modelID = latestModelID
 
         self.mainWG.Add(1)
-        go self.updateModel()
+        go func() {
+          defer self.mainWG.Done()
+          C.updateModel(GB2CB(self.getData("/model")))
+        }()
       }
 
     }()
+
+    batchBytes := CB2GB(C.popBatch())
+
+    self.mainWG.Add(2)
+    go func() {
+      defer self.mainWG.Done()
+      self.postData("/adv_batch", batchBytes)
+    }()
+    go func() {
+      defer self.mainWG.Done()
+      C.pushBatch(GB2CB(self.getData("/clean_batch")))
+    }()
+
     self.mainWG.Wait()
   }
 }
@@ -194,44 +199,11 @@ func (self *Node) postData(resource string, data []byte) {
   defer resp.Body.Close()
 }
 
-func (self *Node) getCleanBatch() {
-  defer self.mainWG.Done()
-
-  self.cleanBatchBuffer <- self.getData("/clean_batch")
-}
-
-func (self *Node) postAdvBatch() {
-  defer self.mainWG.Done()
-
-  self.postData("/adv_batch", <-self.advBatchBuffer)
-}
-
 func (self *Node) getIDs() (uint64, uint64, uint64) {
   defer self.mainWG.Done()
 
   data := self.getData("/ids")
   return binary.BigEndian.Uint64(data[:8]), binary.BigEndian.Uint64(data[8:16]), binary.BigEndian.Uint64(data[16:])
-}
-
-func (self *Node) updateAttack() {
-  defer self.mainWG.Done()
-
-  data := self.getData("/attack")
-  C.updateAttack(GB2CB(data))
-}
-
-func (self *Node) updateModel() {
-  defer self.mainWG.Done()
-
-  data := self.getData("/model")
-  C.updateModel(GB2CB(data))
-}
-
-func (self *Node) updateModelState() {
-  defer self.mainWG.Done()
-
-  data := self.getData("/model_state")
-  C.updateModelState(GB2CB(data))
 }
 
 

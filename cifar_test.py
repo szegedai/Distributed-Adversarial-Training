@@ -1,6 +1,7 @@
 import torch
 import torchvision
 import csv
+import nn_utils
 from dataloader.worker import DistributedAdversarialDataLoader
 from nn_utils.training import train_classifier, LRSchedulerCallback, CLILoggerCallback, Callback
 
@@ -56,15 +57,13 @@ class CSVLoggerCallback(Callback):
             csv.writer(fp).writerow(training_vars['metrics'].values())
 
 
-class ModelUploaderCallback(Callback):
+class ModelStateUploaderCallback(Callback):
     def __init__(self, upload_frequency=1):
         self.upload_frequency = upload_frequency
-        self._model = None
-        self._train_loader = None
 
     def on_batch_end(self, training_vars):
         if training_vars['batch_idx'] % self.upload_frequency == 0:
-            training_vars['train_loader'].update_model(training_vars['model'])
+            training_vars['train_loader'].update_model_state(training_vars['model'].state_dict())
 
 
 def main():
@@ -74,46 +73,50 @@ def main():
     #device = torch.device('cpu')
 
     train_loader = DistributedAdversarialDataLoader(
+        host="http://127.0.0.1:3000",
         batch_scale=1,
         pin_memory_device=device
     )
+    train_loader.reset_server()
 
-    net = torchvision.models.resnet18(num_classes=10).to(device)
+    model_class = torchvision.models.resnet18
+    model_args = []
+    model_kwargs = {'num_classes': 10}
+    net = model_class(*model_args, **model_kwargs).to(device)
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
         torchvision.transforms.RandomCrop(32, padding=4),
         torchvision.transforms.RandomHorizontalFlip()
     ])
-    train_loader.update_model(net)
+
+    train_loader.sync_external_modules([nn_utils])
+
+    train_loader.update_model_state(net.state_dict())
+    train_loader.update_model(model_class, *model_args, **model_kwargs)
     train_loader.update_attack(
         LinfPGDAttack,
-        net,
         torch.nn.CrossEntropyLoss(),
         8 / 255,
         2 / 255,
         10
     )
     train_loader.set_parameters(max_patiente=10, queue_limit=2)
-    train_loader.update_data(
-        torchvision.datasets.CIFAR10, 
-        [
-            data_path
-        ], 
-        {
-            "train": True, 
-            "transform": train_transform, 
-            "download": False
-        },
-        [],
-        {
-            'batch_size': 128, 
-            'shuffle': True, 
-            'num_workers': 2,
-            'prefetch_factor': 2,
-            'multiprocessing_context': 'spawn', 
-            'persistent_workers': True
-        }
+    train_loader.update_dataset(
+        torchvision.datasets.CIFAR10,
+        data_path,
+        train=True, 
+        transform=train_transform, 
+        download=True
+    )
+    train_loader.update_dataloader(
+        torch.utils.data.DataLoader,
+        batch_size=128, 
+        shuffle=True, 
+        num_workers=2,
+        prefetch_factor=2,
+        multiprocessing_context='spawn', 
+        persistent_workers=True
     )
     train_loader.start()
 
@@ -147,7 +150,7 @@ def main():
         net, criterion, optimizer, train_loader, test_loader, attack,
         callbacks=[
             CLILoggerCallback(),
-            ModelUploaderCallback(1),
+            ModelStateUploaderCallback(1),
             #CSVLoggerCallback(save_path + '/training3_logs.csv'),
             LRSchedulerCallback(scheduler)
         ],
