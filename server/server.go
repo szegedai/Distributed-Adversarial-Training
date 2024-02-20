@@ -54,7 +54,7 @@ func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.R
         postHandler(w, r)
       } else {
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-      } 
+      }
     default:
       http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     }
@@ -141,7 +141,7 @@ type Batch struct {
   Adv []byte
 }
 
-type Server struct { 
+type Server struct {
   address string
 
   queueLimit uint64
@@ -168,7 +168,7 @@ type Server struct {
 func (self *Server) Reset() {
   self.queueLimit = 0
   self.maxPatiente = 0
-  self.modelData = nil 
+  self.modelData = nil
   self.modelID = 0
   self.modelStateData = nil
   self.modelStateID = 0
@@ -201,7 +201,7 @@ func (self *Server) Reset() {
   self.freeQ = nil
   self.workQ = sync.Map{}
   self.doneQ = nil
-  
+
   if self.setup == nil {
     self.setup = &TODOSync{}
     self.setup.Init(6)
@@ -251,7 +251,7 @@ func (self *Server) loadCleanBatch() {
 
   batch := &Batch{
     ID: self.nextBatchID,
-    Clean: CB2GB(C.getCleanBatch()), 
+    Clean: CB2GB(C.getCleanBatch()),
     Adv: nil,
   }
 
@@ -368,11 +368,11 @@ func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
 
   // If the batch was already moved back to the freeQ, just drop the batch.
   batchMeta, loaded := self.workQ.LoadAndDelete(batchID)
-  if !loaded { 
+  if !loaded {
     return
   }
   batch := batchMeta.(BatchMeta).Batch
-  
+
   batch.Clean = nil
   batch.Adv = data[8:]
   self.doneQ <- batch
@@ -384,7 +384,7 @@ func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
   batch := <-self.freeQ
 
   go self.loadCleanBatch()
-  
+
   self.modelMutex.RLock()
   self.workQ.Store(batch.ID, BatchMeta{batch, self.modelID})
   self.modelMutex.RUnlock()
@@ -398,13 +398,13 @@ func (self *Server) onGetCleanBatch(w http.ResponseWriter, r *http.Request) {
 
 func (self *Server) onGetIDs(w http.ResponseWriter, r *http.Request) {
   self.setup.Wait()
-  
+
   attackIDBytes := make([]byte, 8)
   modelIDBytes := make([]byte, 8)
   modelStateIDBytes := make([]byte, 8)
   binary.BigEndian.PutUint64(attackIDBytes, self.attackID)
   binary.BigEndian.PutUint64(modelIDBytes, self.modelID)
-  binary.BigEndian.PutUint64(modelStateIDBytes, self.modelID)
+  binary.BigEndian.PutUint64(modelStateIDBytes, self.modelStateID)
 
   w.Write(attackIDBytes)
   w.Write(modelIDBytes)

@@ -57,16 +57,17 @@ class CSVLoggerCallback(Callback):
 
 
 class ModelStateUploaderCallback(Callback):
-    def __init__(self, upload_frequency=1):
+    def __init__(self, model, upload_frequency=1):
+        self.model = model
         self.upload_frequency = upload_frequency
 
     def on_batch_end(self, training_vars):
         if training_vars['batch_idx'] % self.upload_frequency == 0:
-            training_vars['train_loader'].update_model_state(training_vars['model'].state_dict())
+            training_vars['train_loader'].update_model_state(self.model.state_dict())
 
 
 def main():
-    data_path = '/server/imagenet_data'
+    data_path = '/imagenet'
     save_path = '.'
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cpu')
@@ -78,9 +79,13 @@ def main():
         buffer_size=10,
         num_workers=4
     )
+    model_class = torchvision.models.resnet50
+    #model_class = wide_resnet28v1x10
+    model_args = []
+    model_kwargs = {'num_classes': 1000}
 
-    #net = torchvision.models.resnet50(num_classes=1000).to(device)
-    net = wide_resnet28v1x10(1000).to(device)
+    net = model_class(*model_args, **model_kwargs).to(device)
+    dp_net = torch.nn.DataParallel(net, [0, 1, 2, 3], 0)
 
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -91,7 +96,7 @@ def main():
     train_loader.sync_external_modules([nn_utils])
 
     train_loader.update_model_state(net.state_dict())
-    train_loader.update_model(wide_resnet28v1x10, 1000)
+    train_loader.update_model(model_class, *model_args, **model_kwargs)
     train_loader.update_attack(
         LinfPGDAttack,
         torch.nn.CrossEntropyLoss(),
@@ -107,7 +112,7 @@ def main():
     )
     train_loader.update_dataloader(
         torch.utils.data.DataLoader,
-        batch_size=1, 
+        batch_size=512, 
         shuffle=True, 
         num_workers=8, 
         prefetch_factor=4,
@@ -120,10 +125,10 @@ def main():
     optimizer = torch.optim.Adam(net.parameters(), lr=0.05)
 
     train_classifier(
-        net, criterion, optimizer, train_loader, None, None,
+        dp_net, criterion, optimizer, train_loader, None, None,
         callbacks=[
             CLILoggerCallback(),
-            ModelStateUploaderCallback(2)
+            ModelStateUploaderCallback(net, 2)
             #CSVLoggerCallback(save_path + '/training3_logs.csv'),
         ],
         num_epochs=200
