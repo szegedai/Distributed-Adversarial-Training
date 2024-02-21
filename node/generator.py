@@ -133,7 +133,7 @@ def run_generator_loop(device, model_data, attack_data, generator_running, clean
 
         while generator_running:
             if model_state_receiver.poll():
-                model.load_state_dict(model_state_receiver.recv())
+                model.load_state_dict(model_state_receiver.recv(), assign=True)
 
             id_bytes, x, y = clean_batch_receiver.recv()
 

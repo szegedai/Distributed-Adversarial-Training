@@ -100,8 +100,8 @@ func (self *Node) Run() {
   go func() {
     defer self.mainWG.Done()
     C.updateModel(GB2CB(self.getData("/model")))
-    C.pushModelState(GB2CB(self.getData("/model_state")))
     C.updateAttack(GB2CB(self.getData("/attack")))
+    C.pushModelState(GB2CB(self.getData("/model_state")))
   }()
 
   for i := (uint16)(0); i < self.BufferSize; i++ {
@@ -111,9 +111,9 @@ func (self *Node) Run() {
       C.pushBatch(GB2CB(self.getData("/clean_batch")))
     }()
   }
-  
+
   self.mainWG.Wait()
-  
+
   for self.running {
     self.mainWG.Add(1)
     go func() {
@@ -127,7 +127,7 @@ func (self *Node) Run() {
 
         self.mainWG.Add(1)
         go func() {
-          defer self.mainWG.Done() 
+          defer self.mainWG.Done()
           C.pushModelState(GB2CB(self.getData("/model_state")))
         }()
       }
