@@ -1,6 +1,7 @@
 import torch
 import torch.utils.data as data
 import time
+import json
 import requests
 import cloudpickle
 import io
@@ -15,7 +16,8 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         batch_scale=1,
         num_workers=2,
         buffer_size=5,
-        pin_memory_device='cpu'
+        pin_memory_device='cpu',
+        return_extra_data=False
     ):
         assert \
             (batch_scale >= 1 and not batch_scale % 1) or (batch_scale < 1 and batch_scale > 0), \
@@ -23,6 +25,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         self.host = host
         self.pin_memory_device = pin_memory_device
+        self.return_extra_data = return_extra_data
         self._mp_ctx = mp.get_context('spawn')
         self._num_batches = 0
         self._num_processed_batches = 0
@@ -69,7 +72,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def _get_data(self, to, timeout=None):
         response = self._session.get(f'{self.host}/{to}', verify=False, timeout=timeout)
         if response.status_code == 200:
-            return response.content
+            return response.content, response.headers.get('X-Extra-Data', {})
         else:
             raise Exception('GET request failed with status code', response.status_code)
 
@@ -115,7 +118,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         # Setup the correct number of batches.
         self._num_batches = int.from_bytes(
-            self._get_data('num_batches'), 
+            self._get_data('num_batches')[0], 
             'big', 
             signed=False
         )
@@ -201,17 +204,19 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self._send_data('reset', b'')
 
     def get_batch(self):
+        data, extra_data = self._get_data('adv_batch')
         return self._deserialize_data(
-            self._get_data('adv_batch'), 
+            data, 
             self.pin_memory_device
-        )
+        ), json.loads(extra_data)
 
     def _batch_downloader(self):
         while self._running.value:
             if self._batch_scale == 1:
-                self._batch_queue.put(self.get_batch(), block=True, timeout=None)
+                batch, extra_data = self.get_batch()
+                self._batch_queue.put((*batch, [extra_data]) if self.return_extra_data else batch, block=True, timeout=None)
             elif self._batch_scale < 1:
-                original_batch = self.get_batch()
+                original_batch, extra_data = self.get_batch()
                 batch_size = original_batch[0].size(0)
                 indices = torch.arange(0, (1 + self._batch_scale) * batch_size, self._batch_scale * batch_size).to(dtype=torch.int64)
                 for i in range(len(indices) - 1):
@@ -219,16 +224,18 @@ class DistributedAdversarialDataLoader(data.DataLoader):
                         original_batch[0][indices[i]:indices[i + 1]],
                         original_batch[1][indices[i]:indices[i + 1]]
                     )
-                    self._batch_queue.put(batch, block=True, timeout=None) 
+                    self._batch_queue.put((*batch, [extra_data]) if self.return_extra_data else batch, block=True, timeout=None) 
             else:
                 xes, ys = [], []
+                extra_datas = []
                 for _ in range(self._batch_scale):
-                    x, y = self.get_batch()
+                    (x, y), extra_data = self.get_batch()
                     xes.append(x)
                     ys.append(y)
+                    extra_datas.append(extra_data)
                 batch = (torch.cat(xes), torch.cat(ys))
 
-                self._batch_queue.put(batch, block=True, timeout=None)
+                self._batch_queue.put((*batch, extra_datas), block=True, timeout=None)
 
     def _model_uploader(self):
         while self._running.value:

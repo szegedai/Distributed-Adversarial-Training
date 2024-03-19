@@ -7,6 +7,7 @@ import "C"
 import (
 	"bytes"
 	"encoding/binary"
+  "encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -159,7 +160,7 @@ func (self *Node) Run() {
     self.mainWG.Add(2)
     go func() {
       defer self.mainWG.Done()
-      self.postData("/adv_batch", batchBytes)
+      self.postData("/adv_batch", batchBytes, &struct{ ModelStateID uint64 }{self.modelStateID})
     }()
     go func() {
       defer self.mainWG.Done()
@@ -191,11 +192,30 @@ func (self *Node) getData(resource string) []byte {
   return body
 }
 
-func (self *Node) postData(resource string, data []byte) {
-  resp, err := self.session.Post(self.Host + resource, "application/octet-stream", bytes.NewBuffer(data))
+func (self *Node) postData(resource string, data []byte, extraData *any) {
+  req, err := http.NewRequest("POST", self.Host + resource, bytes.NewBuffer(data))
   if err != nil {
     log.Fatal(err)
   }
+
+  req.Header.Set("Content-Type", "application/octet-stream")
+
+  if extraData != nil {
+    jsonString, err := json.Marshal(*extraData)
+    if err != nil {
+      log.Fatal(err)
+    }
+    req.Header.Set("X-Extra-Data", string(jsonString))
+  }
+
+  resp, err := self.session.Do(req)
+  if err != nil {
+    log.Fatal(err)
+  }
+  /*resp, err := self.session.Post(self.Host + resource, "application/octet-stream", bytes.NewBuffer(data))
+  if err != nil {
+    log.Fatal(err)
+  }*/
   defer resp.Body.Close()
 }
 

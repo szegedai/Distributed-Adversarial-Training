@@ -6,6 +6,7 @@ package main
 import "C"
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -139,6 +140,7 @@ type Batch struct {
   ID uint64
   Clean []byte
   Adv []byte
+  ExtraData *string
 }
 
 type Server struct {
@@ -253,6 +255,7 @@ func (self *Server) loadCleanBatch() {
     ID: self.nextBatchID,
     Clean: CB2GB(C.getCleanBatch()),
     Adv: nil,
+    ExtraData: nil,
   }
 
   self.nextBatchID += 1
@@ -354,11 +357,15 @@ func (self *Server) onPostModelState(w http.ResponseWriter, r *http.Request) {
 func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
   self.setup.Wait()
 
-  w.Write((<-self.doneQ).Adv)
+  batch := <-self.doneQ
+
+  w.Header().Add("X-Extra-Data", *batch.ExtraData)
+  w.Write(batch.Adv)
 }
 
 func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
   data, err := ioutil.ReadAll(r.Body)
+  extraData := r.Header.Get("X-Extra-Data")
   if err != nil {
     log.Println(err)
     return
@@ -375,6 +382,9 @@ func (self *Server) onPostAdvBatch(w http.ResponseWriter, r *http.Request) {
 
   batch.Clean = nil
   batch.Adv = data[8:]
+  if extraData != "" {
+    batch.ExtraData = &extraData
+  }
   self.doneQ <- batch
 }
 
