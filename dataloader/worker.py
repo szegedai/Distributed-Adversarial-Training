@@ -17,7 +17,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         num_workers=2,
         buffer_size=5,
         pin_memory_device='cpu',
-        return_extra_data=False
+        store_extra_data=False
     ):
         assert \
             (batch_scale >= 1 and not batch_scale % 1) or (batch_scale < 1 and batch_scale > 0), \
@@ -25,7 +25,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
 
         self.host = host
         self.pin_memory_device = pin_memory_device
-        self.return_extra_data = return_extra_data
+        self.store_extra_data = store_extra_data
         self._mp_ctx = mp.get_context('spawn')
         self._num_batches = 0
         self._num_processed_batches = 0
@@ -36,6 +36,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self._batch_queue = self._mp_ctx.Queue(buffer_size)
         self._model_uploader_process = None
         self._model_state_queue = self._mp_ctx.Queue()
+        self._extra_data_queue = self._mp_ctx.Queue()
         self._running = self._mp_ctx.Value('b', False, lock=True)
         self._required_to_start = {
             'update_attack': True,
@@ -72,7 +73,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def _get_data(self, to, timeout=None):
         response = self._session.get(f'{self.host}/{to}', verify=False, timeout=timeout)
         if response.status_code == 200:
-            return response.content, response.headers.get('X-Extra-Data', {})
+            return response.content, response.headers.get('X-Extra-Data', '{}')
         else:
             raise Exception('GET request failed with status code', response.status_code)
 
@@ -210,11 +211,16 @@ class DistributedAdversarialDataLoader(data.DataLoader):
             self.pin_memory_device
         ), json.loads(extra_data)
 
+    def get_extra_data(self, block=True, timeout=None):
+        return self._extra_data_queue.get(block, timeout)
+
     def _batch_downloader(self):
         while self._running.value:
             if self._batch_scale == 1:
                 batch, extra_data = self.get_batch()
-                self._batch_queue.put((*batch, [extra_data]) if self.return_extra_data else batch, block=True, timeout=None)
+                self._batch_queue.put(batch, block=True, timeout=None)
+                if self.store_extra_data:
+                    self._extra_data_queue.put_nowait(extra_data)
             elif self._batch_scale < 1:
                 original_batch, extra_data = self.get_batch()
                 batch_size = original_batch[0].size(0)
@@ -224,7 +230,9 @@ class DistributedAdversarialDataLoader(data.DataLoader):
                         original_batch[0][indices[i]:indices[i + 1]],
                         original_batch[1][indices[i]:indices[i + 1]]
                     )
-                    self._batch_queue.put((*batch, [extra_data]) if self.return_extra_data else batch, block=True, timeout=None) 
+                    self._batch_queue.put(batch, block=True, timeout=None)
+                if self.store_extra_data:
+                    self._extra_data_queue.put_nowait(extra_data)
             else:
                 xes, ys = [], []
                 extra_datas = []
@@ -235,7 +243,10 @@ class DistributedAdversarialDataLoader(data.DataLoader):
                     extra_datas.append(extra_data)
                 batch = (torch.cat(xes), torch.cat(ys))
 
-                self._batch_queue.put((*batch, extra_datas), block=True, timeout=None)
+                self._batch_queue.put(batch, block=True, timeout=None)
+                if self.store_extra_data:
+                    for extra_data in extra_datas:
+                        self._extra_data_queue.put_nowait(extra_data)
 
     def _model_uploader(self):
         while self._running.value:
