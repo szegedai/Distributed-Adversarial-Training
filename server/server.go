@@ -6,7 +6,6 @@ package main
 import "C"
 import (
 	"encoding/binary"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
