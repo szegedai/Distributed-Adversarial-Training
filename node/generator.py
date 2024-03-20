@@ -126,10 +126,13 @@ def stop_generator():
 
 def run_generator_loop(device, model_data, attack_data, generator_running, clean_batch_receiver, adv_batch_sender, model_state_receiver):
     try:
+        torch.set_float32_matmul_precision('high')
+
         model_class, model_args, model_kwargs = pickle.loads(model_data)
         attack_class, attack_args, attack_kwargs = pickle.loads(attack_data)
         model = model_class(*model_args, **model_kwargs).to(device)
-        attack = attack_class(model, *attack_args, **attack_kwargs)
+        compiled_model = torch.compile(model)
+        attack = attack_class(compiled_model, *attack_args, **attack_kwargs)
 
         while generator_running:
             if model_state_receiver.poll():

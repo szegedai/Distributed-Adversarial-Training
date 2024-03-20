@@ -74,17 +74,18 @@ def main():
 
     train_loader = DistributedAdversarialDataLoader(
         host="http://127.0.0.1:3000",
-        batch_scale=1,
+        batch_scale=1 / 2,
         pin_memory_device=device,
         buffer_size=10,
         num_workers=4
     )
-    model_class = torchvision.models.resnet50
+    model_factory = torchvision.models.resnet50
+    #compiled_model_factory = lambda *args, **kwargs: torch.compile(model_factory(*args, **kwargs))
     #model_class = wide_resnet28v1x10
     model_args = []
     model_kwargs = {'num_classes': 1000}
 
-    net = model_class(*model_args, **model_kwargs).to(device)
+    net = model_factory(*model_args, **model_kwargs).to(device)
     dp_net = torch.nn.DataParallel(net, [0, 1, 2, 3], 0)
 
     train_transform = torchvision.transforms.Compose([
@@ -96,7 +97,8 @@ def main():
     train_loader.sync_external_modules([nn_utils])
 
     train_loader.update_model_state(net.state_dict())
-    train_loader.update_model(model_class, *model_args, **model_kwargs)
+    train_loader.update_model(model_factory, *model_args, **model_kwargs)
+    #train_loader.update_model(compiled_model_factory, *model_args, **model_kwargs)
     train_loader.update_attack(
         LinfPGDAttack,
         torch.nn.CrossEntropyLoss(),
