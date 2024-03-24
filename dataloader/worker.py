@@ -26,6 +26,7 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self.host = host
         self.pin_memory_device = pin_memory_device
         self.store_extra_data = store_extra_data
+        self._model_state_id = 0
         self._mp_ctx = mp.get_context('spawn')
         self._num_batches = 0
         self._num_processed_batches = 0
@@ -188,7 +189,8 @@ class DistributedAdversarialDataLoader(data.DataLoader):
         self._required_to_start['update_model'] = False
 
     def update_model_state(self, model_state):
-        self._model_state_queue.put_nowait(model_state)
+        self._model_state_id += 1
+        self._model_state_queue.put_nowait((self._model_state_id, model_state))
         self._required_to_start['update_model_state'] = False
 
     def set_parameters(self, max_patiente, queue_limit):
@@ -251,16 +253,19 @@ class DistributedAdversarialDataLoader(data.DataLoader):
     def _model_uploader(self):
         while self._running.value:
             # Wait until there is at least one new model in the queue.
-            model_state = self._model_state_queue.get(block=True, timeout=None)
+            model_state_id, model_state = self._model_state_queue.get(block=True, timeout=None)
             # If there are multiple models in thr queue, empty it and use the last one.
             try:
                 while True:        
-                    model_state = self._model_state_queue.get_nowait()
+                    model_state_id, model_state = self._model_state_queue.get_nowait()
             except queue.Empty:
                 pass
 
             self._send_data(
                 'model_state',
-                self._serialize_data(deepcopy(model_state))
+                b''.join((
+                    model_state_id.to_bytes(8, 'big'),
+                    self._serialize_data(deepcopy(model_state))
+                ))
             )
 

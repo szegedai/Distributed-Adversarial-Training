@@ -37,30 +37,6 @@ func CB2GB(b C.bytes_t) []byte {
   return bytes
 }
 
-func dispathRequest(pattern string, getHandler func(http.ResponseWriter, *http.Request), postHandler func(http.ResponseWriter, *http.Request)) {
-  http.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-    switch r.Method {
-    case http.MethodGet:
-      if getHandler != nil {
-        w.Header().Set("Content-Type", "application/octet-stream")
-        w.WriteHeader(http.StatusOK)
-        getHandler(w, r)
-      } else {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-      }
-    case http.MethodPost:
-      if postHandler != nil {
-        w.WriteHeader(http.StatusOK)
-        postHandler(w, r)
-      } else {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-      }
-    default:
-      http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-    }
-  })
-}
-
 func printBytes(data []byte) {
   fmt.Print("Go: ")
   for i := 0; i < 10; i++ {
@@ -219,25 +195,31 @@ func (self *Server) Run() {
   C.initPython()
   defer C.finalizePython()
 
-  dispathRequest("/attack", self.onGetAttack, self.onPostAttack)
-  dispathRequest("/model", self.onGetModel, self.onPostModel)
-  dispathRequest("/model_state", self.onGetModelState, self.onPostModelState)
-  dispathRequest("/adv_batch", self.onGetAdvBatch, self.onPostAdvBatch)
-  dispathRequest("/clean_batch", self.onGetCleanBatch, nil)
-  dispathRequest("/ids", self.onGetIDs, nil)
-  dispathRequest("/num_batches", self.onGetNumBatches, nil)
-  dispathRequest("/dataset", nil, self.onPostDataset)
-  dispathRequest("/dataloader", nil, self.onPostDataloader)
-  dispathRequest("/parameters", nil, self.onPostParameters)
-  http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+  mux := http.NewServeMux()
+
+  mux.HandleFunc("GET /attack", self.onGetAttack)
+  mux.HandleFunc("POST /attack", self.onPostAttack)
+  mux.HandleFunc("GET /model", self.onGetModel)
+  mux.HandleFunc("POST /model", self.onPostModel)
+  mux.HandleFunc("GET /model_state", self.onGetModelState)
+  mux.HandleFunc("POST /model_state", self.onPostModelState)
+  mux.HandleFunc("GET /adv_batch", self.onGetAdvBatch)
+  mux.HandleFunc("POST /adv_batch", self.onPostAdvBatch)
+  mux.HandleFunc("GET /clean_batch", self.onGetCleanBatch)
+  mux.HandleFunc("GET /ids", self.onGetIDs)
+  mux.HandleFunc("GET /num_batches", self.onGetNumBatches)
+  mux.HandleFunc("POST /dataset", self.onPostDataset)
+  mux.HandleFunc("POST /dataloader", self.onPostDataloader)
+  mux.HandleFunc("POST /parameters", self.onPostParameters)
+  mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
     log.Println("Reseting server")
     self.Reset()
   })
 
-  httpServer := &http.Server{Addr: self.address}
+  //httpServer := &http.Server{Addr: self.address}
 
   go func() {
-    if err := httpServer.ListenAndServe(); err != nil {
+    if err := http.ListenAndServe(self.address, mux); err != nil {
       log.Fatalln(err)
     }
   }()
@@ -330,8 +312,8 @@ func (self *Server) onPostModelState(w http.ResponseWriter, r *http.Request) {
   }
 
   self.modelMutex.Lock()
-  self.modelStateData = data
-  self.modelStateID += 1
+  self.modelStateID = binary.BigEndian.Uint64(data[:8])
+  self.modelStateData = data[8:]
   self.modelMutex.Unlock()
 
   // Resend expired batches.
@@ -358,7 +340,7 @@ func (self *Server) onGetAdvBatch(w http.ResponseWriter, r *http.Request) {
 
   batch := <-self.doneQ
 
-  w.Header().Add("X-Extra-Data", *batch.ExtraData)
+  w.Header().Set("X-Extra-Data", *batch.ExtraData)
   w.Write(batch.Adv)
 }
 

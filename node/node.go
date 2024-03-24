@@ -160,7 +160,7 @@ func (self *Node) Run() {
     self.mainWG.Add(2)
     go func() {
       defer self.mainWG.Done()
-      self.postData("/adv_batch", batchBytes, &struct{ ModelStateID uint64 }{self.modelStateID})
+      self.postData("/adv_batch", batchBytes, struct{ ModelStateID uint64 }{self.modelStateID})
     }()
     go func() {
       defer self.mainWG.Done()
@@ -192,7 +192,7 @@ func (self *Node) getData(resource string) []byte {
   return body
 }
 
-func (self *Node) postData(resource string, data []byte, extraData *any) {
+func (self *Node) postData(resource string, data []byte, extraData any) {
   req, err := http.NewRequest("POST", self.Host + resource, bytes.NewBuffer(data))
   if err != nil {
     log.Fatal(err)
@@ -201,7 +201,7 @@ func (self *Node) postData(resource string, data []byte, extraData *any) {
   req.Header.Set("Content-Type", "application/octet-stream")
 
   if extraData != nil {
-    jsonString, err := json.Marshal(*extraData)
+    jsonString, err := json.Marshal(extraData)
     if err != nil {
       log.Fatal(err)
     }
